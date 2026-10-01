@@ -1,6 +1,22 @@
 import React, { useState } from "react";
 import { createRoot } from "react-dom/client";
-import { ChevronDown, ChevronUp, Plus, Trash2, CheckCircle2, FileText } from "lucide-react";
+import {
+  Bomb,
+  Car,
+  Check,
+  CheckCircle2,
+  ChevronDown,
+  ChevronUp,
+  FileText,
+  Info,
+  ListChecks,
+  Plus,
+  RotateCcw,
+  Send,
+  ShieldCheck,
+  Trash2,
+  Users
+} from "lucide-react";
 import companyLogo from "./assets/logos/erkhet-tunsh.svg";
 import "./styles.css";
 import SafetyReader from "./SafetyReader";
@@ -270,14 +286,16 @@ function App() {
   if (submitted) {
     return (
       <main className="page">
-        <div className="formCard successScreen">
-          <div className="success successScreenBox">
-            <CheckCircle2 size={20} />
-            <div>
-              <strong>Амжилттай илгээгдлээ.</strong>
-              <span>Аяллын мэдээлэл бүртгэгдлээ.</span>
-            </div>
+        <AppBar />
+        <div className="successScreen">
+          <div className="successIcon">
+            <CheckCircle2 size={44} strokeWidth={2.2} />
           </div>
+          <h2>Амжилттай илгээгдлээ</h2>
+          <p>Аяллын мэдээлэл бүртгэгдэж, хариуцсан ажилтнуудад илгээгдлээ.</p>
+          <button type="button" className="secondaryBtn" onClick={() => setSubmitted(false)}>
+            <RotateCcw size={18} /> Шинэ маягт бөглөх
+          </button>
         </div>
       </main>
     );
@@ -285,42 +303,41 @@ function App() {
 
   return (
     <main className="page">
+      <AppBar />
       <div className="formCard">
-        <header className="docHeader">
-          <div className="logoBox">
-            <CompanyLogo />
-          </div>
-          <div className="titleArea">
-            <h1>ЭРХЭТ ТҮНШ ХХК</h1>
-            {isBlast ? (
-              <h1>ТЭСРЭХ БОДИС ТЭЭВЭРЛЭХ ҮЕИЙН</h1>
-            ) : (
-              <h1>АТҮТ БОЛОН ЗАМЫН УНААГААР ЗОРЧИХ ҮЕИЙН</h1>
-            )}
-            <h1>АЮУЛГҮЙ АЖИЛЛАГААНЫ ЗААВАРЧИЛГАА</h1>
-            <div className="meta">
-              <span>Хувилбар: 01</span>
-            </div>
-          </div>
+        <header className={`hero${isBlast ? " hero--blast" : ""}`}>
+          <span className="heroChip">Хувилбар 01</span>
+          <h1>
+            {isBlast
+              ? "Тэсрэх бодис тээвэрлэх үеийн"
+              : "АТҮТ болон замын унаагаар зорчих үеийн"}
+          </h1>
+          <p>Аюулгүй ажиллагааны зааварчилгаа</p>
         </header>
 
         <form onSubmit={submit}>
-          <Section title="Үндсэн мэдээлэл">
+          <div className="segmented" role="radiogroup" aria-label="Аяллын төрөл">
+            {TRIP_TYPES.map((tripType) => (
+              <button
+                key={tripType}
+                type="button"
+                role="radio"
+                aria-checked={form.tripType === tripType}
+                className={form.tripType === tripType ? "active" : ""}
+                onClick={() => form.tripType !== tripType && changeTripType({ target: { value: tripType } })}
+              >
+                {tripType === BLAST_TRIP ? <Bomb size={17} /> : <Car size={17} />}
+                {tripType}
+              </button>
+            ))}
+          </div>
+
+          <Section title="Үндсэн мэдээлэл" icon={<Info size={18} />}>
             <Field label="Компани">
               <select name="company" value={form.company} onChange={updateForm}>
                 {companyOptions.map((company) => (
                   <option key={company.value} value={company.value}>
                     {company.value}
-                  </option>
-                ))}
-              </select>
-            </Field>
-
-            <Field label="Аяллын төрөл">
-              <select name="tripType" value={form.tripType} onChange={changeTripType}>
-                {TRIP_TYPES.map((tripType) => (
-                  <option key={tripType} value={tripType}>
-                    {tripType}
                   </option>
                 ))}
               </select>
@@ -405,7 +422,7 @@ function App() {
             <BlastMaterialSection form={form} updateForm={updateForm} updateDigits={updateDigits} />
           )}
 
-          <Section title="Тээврийн хэрэгсэл">
+          <Section title="Тээврийн хэрэгсэл" icon={<Car size={18} />}>
             {!isBlast && (
             <Field label="Аялах тээврийн хэрэгсэл *">
               <select
@@ -432,7 +449,11 @@ function App() {
             )}
           </Section>
 
-          <Section title={`${isBlast ? "Тэсэлгээний баг" : "Зорчих ажилтан"} (${employees.length})`}>
+          <Section
+            title={isBlast ? "Тэсэлгээний баг" : "Зорчих ажилтан"}
+            icon={<Users size={18} />}
+            badge={`${employees.length}/4`}
+          >
             <p className="helper">Хамгийн ихдээ 4 ажилтан бүртгэх боломжтой.</p>
 
             {employees.map((employee, index) => (
@@ -502,22 +523,29 @@ function App() {
           </Section>
 
           {activeChecklist.length > 0 && (
-            <Section title="Тээвэрлэлтийн өмнөх шалгах хуудас">
-              <p className="helper">Бүх зүйлийг шалгаж тэмдэглэнэ үү.</p>
-              {activeChecklist.map((item) => (
-                <label className="accept" key={item}>
-                  <input
-                    type="checkbox"
-                    checked={checklist.includes(item)}
-                    onChange={() => toggleCheck(item)}
-                  />
-                  <span>{item}</span>
-                </label>
-              ))}
+            <Section
+              title="Шалгах хуудас"
+              icon={<ListChecks size={18} />}
+              badge={`${activeChecklist.filter((item) => checklist.includes(item)).length}/${activeChecklist.length}`}
+            >
+              <p className="helper">Тээвэрлэлтийн өмнө бүх зүйлийг шалгаж тэмдэглэнэ үү.</p>
+              <div className="checkList">
+                {activeChecklist.map((item) => (
+                  <label className="checkRow" key={item}>
+                    <input
+                      type="checkbox"
+                      checked={checklist.includes(item)}
+                      onChange={() => toggleCheck(item)}
+                    />
+                    <span className="checkMark" aria-hidden="true"><Check size={14} strokeWidth={3} /></span>
+                    <span>{item}</span>
+                  </label>
+                ))}
+              </div>
             </Section>
           )}
 
-          <Section title="Аюулгүй ажиллагааны зааварчилгаа">
+          <Section title="Зааварчилгаа ба гарын үсэг" icon={<ShieldCheck size={18} />}>
             <div className="signatureBox">
               <div className="signatureHeader">
                 <span>Гарын үсэг</span>
@@ -599,12 +627,13 @@ function App() {
               </div>
             )}
 
-            <label className="accept">
+            <label className="checkRow accept">
               <input
                 type="checkbox"
                 checked={accepted}
                 onChange={(e) => setAccepted(e.target.checked)}
               />
+              <span className="checkMark" aria-hidden="true"><Check size={14} strokeWidth={3} /></span>
               <span>
                 Дээрх шаардлагыг бүрэн уншиж танилцсан, ойлгосон бөгөөд мөрдөхөө зөвшөөрч байна.
               </span>
@@ -613,7 +642,7 @@ function App() {
 
           <div className="submitArea">
             <button className="submitBtn" type="submit" disabled={!accepted || sending}>
-              {sending ? "Илгээж байна..." : "Илгээх"}
+              {sending ? "Илгээж байна..." : <><Send size={18} /> Илгээх</>}
             </button>
           </div>
         </form>
@@ -713,7 +742,7 @@ function BlastBasicFields({ form, updateForm }) {
 
 function BlastMaterialSection({ form, updateForm, updateDigits }) {
   return (
-    <Section title="Тэсрэх бодис">
+    <Section title="Тэсрэх бодис" icon={<Bomb size={18} />}>
       <div className="twoCols">
         <Field label="Тэсрэх бодисын төрөл *">
           <select required name="explosiveType" value={form.explosiveType} onChange={updateForm}>
@@ -808,10 +837,26 @@ function BlastSafety() {
   );
 }
 
-function Section({ title, children }) {
+function AppBar() {
+  return (
+    <div className="appBar">
+      <CompanyLogo />
+      <div>
+        <strong>ЭРХЭТ ТҮНШ ХХК</strong>
+        <span>Аюулгүй ажиллагааны зааварчилгаа</span>
+      </div>
+    </div>
+  );
+}
+
+function Section({ title, icon, badge, children }) {
   return (
     <section className="section">
-      <div className="sectionTitle">{title}</div>
+      <div className="sectionTitle">
+        {icon && <span className="sectionIcon">{icon}</span>}
+        <span>{title}</span>
+        {badge && <span className="sectionBadge">{badge}</span>}
+      </div>
       <div className="sectionBody">{children}</div>
     </section>
   );
