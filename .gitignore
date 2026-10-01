@@ -1,0 +1,16 @@
+node_modules/
+dist/
+.vite/
+.DS_Store
+*.log
+# Match dotted and undotted spellings: a file named "env.local" slipped
+# past a ".env.local"-only rule and leaked SMTP credentials to a public repo.
+.env
+.env.*
+env.local
+env.*.local
+!.env.local.example
+.vercel
+service-account*.json
+sample-output.pdf
+.env*
