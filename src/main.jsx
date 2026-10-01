@@ -300,7 +300,6 @@ function App() {
             <h1>АЮУЛГҮЙ АЖИЛЛАГААНЫ ЗААВАРЧИЛГАА</h1>
             <div className="meta">
               <span>Хувилбар: 01</span>
-              {!isBlast && <span>   ЗЧМ-УТ-Ж39-Х01 Холын аяллын журам    </span>}
             </div>
           </div>
         </header>
