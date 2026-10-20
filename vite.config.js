@@ -1,12 +1,11 @@
 import { defineConfig, loadEnv } from "vite";
 import react from "@vitejs/plugin-react";
 import { handleMechanic, listForMechanic, sendFormMail } from "./api/_form-mail.js";
-import { originOf } from "./api/_http.js";
 
 const MAX_BODY_BYTES = 6 * 1024 * 1024;
 
 const routes = {
-  "/api/send": (payload, req) => sendFormMail(payload, { origin: originOf(req) }),
+  "/api/send": (payload) => sendFormMail(payload),
   "/api/mechanic": (payload) => (payload?.action === "list" ? listForMechanic(payload) : handleMechanic(payload))
 };
 
@@ -42,7 +41,7 @@ function devApi() {
 
             const payload = JSON.parse(Buffer.concat(chunks).toString("utf8"));
 
-            const { status, body } = await handle(payload, req);
+            const { status, body } = await handle(payload);
 
             return reply(status, body);
           } catch (error) {

@@ -72,8 +72,6 @@ function recipients() {
   return configured.length > 0 ? configured : DEFAULT_RECIPIENTS;
 }
 
-const mechanicRecipients = () => addressList("MECHANIC_TO");
-
 const isBlast = (form) => form.tripType === BLAST_TRIP;
 
 const directionOf = (form) =>
@@ -262,11 +260,10 @@ function validate(form, employees) {
 }
 
 /**
- * The email body. With `mechanicLink` it is the mechanic's copy, ending in a
- * button to the inspection form; with `inspection` it is the final copy,
- * including the mechanic's findings and signature.
+ * The email body; with `inspection`, it includes the mechanic's findings
+ * and signature.
  */
-function buildHtml(form, employees, { inspection, mechanicLink } = {}) {
+function buildHtml(form, employees, { inspection } = {}) {
   const row = (label, value) => `
         <tr>
           <td style="padding:8px 12px; background:#f9fafb; border:1px solid #e5e7eb; width:200px; vertical-align:top;">${esc(label)}</td>
@@ -326,15 +323,6 @@ function buildHtml(form, employees, { inspection, mechanicLink } = {}) {
     ? ["Тэсрэх бодис тээвэрлэх үеийн", "аюулгүй ажиллагааны зааварчилгаа"]
     : ["АТҮТ болон замын унаагаар зорчих үеийн", "аюулгүй ажиллагааны зааварчилгаа"];
 
-  const mechanicBlock = mechanicLink
-    ? `
-        <div style="margin:0 0 20px; padding:16px; background:#fff7e6; border:1px solid #fcc92b; border-radius:8px;">
-          <div style="font-weight:700; margin-bottom:6px;">Механикийн үзлэг шаардлагатай</div>
-          <div style="font-size:14px; margin-bottom:14px;">Тээврийн хэрэгслийг шалгаад доорх товчоор үзлэгийн маягтаа бөглөж илгээнэ үү. Таны маягт илгээгдсэний дараа энэ мэдээлэл хариуцсан ажилтнуудад очно.</div>
-          <a href="${esc(mechanicLink)}" style="display:inline-block; padding:12px 20px; background:#1f8a43; color:#ffffff; text-decoration:none; font-weight:700; border-radius:8px;">Үзлэгийн маягт бөглөх</a>
-        </div>`
-    : "";
-
   return `<!doctype html>
 <html lang="mn">
   <body style="margin:0; padding:24px; background:#f3f4f6; font-family:Arial,Helvetica,sans-serif; color:#111827;">
@@ -344,7 +332,7 @@ function buildHtml(form, employees, { inspection, mechanicLink } = {}) {
         <div style="font-size:18px; font-weight:700;">${esc(heading[1])}</div>
       </div>
 
-      <div style="padding:24px;">${mechanicBlock}
+      <div style="padding:24px;">
         <table cellpadding="0" cellspacing="0" style="border-collapse:collapse; width:100%; font-size:14px;">
           ${summaryRows(form).map(([label, value]) => row(label, value)).join("")}
           ${employeeRows}${checklistRows}
@@ -364,12 +352,8 @@ function buildHtml(form, employees, { inspection, mechanicLink } = {}) {
 </html>`;
 }
 
-function buildText(form, employees, { inspection, mechanicLink } = {}) {
+function buildText(form, employees, { inspection } = {}) {
   const lines = [titleOf(form), ""];
-
-  if (mechanicLink) {
-    lines.push("Механикийн үзлэг шаардлагатай. Үзлэгийн маягт:", mechanicLink, "");
-  }
 
   lines.push(...summaryRows(form).map(([label, value]) => `${label}: ${value || "-"}`), "");
 
@@ -397,12 +381,10 @@ function buildText(form, employees, { inspection, mechanicLink } = {}) {
   return lines.join("\n");
 }
 
-function buildSubject(form, employees, { inspection, mechanicLink } = {}) {
+function buildSubject(form, employees, { inspection } = {}) {
   const names = employees.map((employee) => employee.name).filter(Boolean).join(", ");
   const prefix = isBlast(form) ? "Тэсэлгээний аялал" : "Аяллын зааварчилгаа";
-  const stage = mechanicLink
-    ? "Механикийн үзлэг хүлээгдэж байна | "
-    : inspection ? `Механик: ${inspection.result} | ` : "";
+  const stage = inspection ? `Механик: ${inspection.result} | ` : "";
 
   return `${stage}${prefix} | ${form.travelDate} | ${directionOf(form)} | ${names}`;
 }
@@ -606,12 +588,12 @@ async function sendFinal(form, employees, signature, inspection, mechanicSignatu
 }
 
 /**
- * Validates the submitted form and emails it: to the final recipients for
- * public transport, otherwise to the mechanics with a link to their
- * inspection form. `origin` is the site's base URL for that link.
+ * Validates the submitted form. Public-transport trips are emailed to the
+ * final recipients; every other trip waits on the /mechanic list until a
+ * mechanic inspects it, and that sends everything on in one email.
  * Returns a { status, body } pair the HTTP layer can send as-is.
  */
-export async function sendFormMail(payload, { origin } = {}) {
+export async function sendFormMail(payload) {
   const form = payload?.form;
   const employees = Array.isArray(payload?.employees) ? payload.employees : [];
 
@@ -629,42 +611,36 @@ export async function sendFormMail(payload, { origin } = {}) {
     return { status: 400, body: { error: signature.error } };
   }
 
+  // Checked up front even for the mechanic route, whose email is only sent
+  // later, so a form is never accepted that could not be delivered.
   const configError = mailConfigError();
   if (configError) return configError;
 
   if (!needsMechanic(form)) return sendFinal(form, employees, signature);
 
+  // The small signature copy is what reaches the final email.
   const thumb = parseSignature(payload?.signatureThumb, { maxBytes: MAX_THUMB_BYTES });
   if (thumb.error) {
     return { status: 400, body: { error: thumb.error } };
   }
 
-  if (!hasLinkSecret() || mechanicRecipients().length === 0 || !origin) {
-    console.error("[api/send] mechanic route needs MECHANIC_TO, MECHANIC_LINK_SECRET (16+ chars) and APP_URL or a Host header");
-    return { status: 500, body: { error: "Механикийн имэйл тохиргоо дутуу байна (MECHANIC_TO, MECHANIC_LINK_SECRET)." } };
+  const store = await getStore();
+  if (!hasLinkSecret() || !store) {
+    console.error("[api/send] mechanic route needs MECHANIC_LINK_SECRET (16+ chars) and a Blob store");
+    return { status: 500, body: { error: "Механикийн жагсаалтын тохиргоо дутуу байна (MECHANIC_LINK_SECRET, Vercel Blob)." } };
   }
 
-  // The token carries the small signature copy; the mechanic's email
-  // attaches the full-size one.
-  const recordId = randomUUID();
-  const token = signToken({ id: recordId, form, employees, signature: payload.signatureThumb });
-  const mechanicLink = `${origin.replace(/\/+$/, "")}/mechanic#mechanic=${token}`;
-
-  const message = {
-    to: mechanicRecipients(),
-    subject: buildSubject(form, employees, { mechanicLink }),
-    html: buildHtml(form, employees, { mechanicLink }),
-    text: buildText(form, employees, { mechanicLink }),
-    images: [[signature, SIGNATURE_CID]]
-  };
+  const id = randomUUID();
+  const token = signToken({ id, form, employees, signature: payload.signatureThumb });
 
   try {
-    const id = await deliver(message);
-    await saveForMechanic({ id: recordId, token, form, employees });
-    return { status: 200, body: { ok: true, id, stage: "mechanic", to: message.to } };
+    await store.savePending({ id, token, createdAt: Date.now(), status: "pending", summary: recordSummary(form, employees) });
   } catch (error) {
-    return deliveryFailed(error);
+    console.error("[api/send] could not save submission for /mechanic:", error);
+    return { status: 502, body: { error: "Маягтыг хадгалж чадсангүй. Та дахин оролдоно уу." } };
   }
+
+  return { status: 200, body: { ok: true, id, stage: "mechanic" } };
 }
 
 /** Short description of a submission for the /mechanic list. */
@@ -677,19 +653,6 @@ const recordSummary = (form, employees) => ({
   direction: directionOf(form),
   people: employees.map((employee) => employee.name).filter(Boolean)
 });
-
-/**
- * Lists the submission on /mechanic. The email has already gone out, so a
- * storage failure is logged rather than failing the employee's submit.
- */
-async function saveForMechanic({ id, token, form, employees }) {
-  try {
-    const store = await getStore();
-    await store?.savePending({ id, token, createdAt: Date.now(), status: "pending", summary: recordSummary(form, employees) });
-  } catch (error) {
-    console.error("[api] could not save submission for /mechanic:", error);
-  }
-}
 
 function passwordMatches(given) {
   const expected = process.env.MECHANIC_PASSWORD;

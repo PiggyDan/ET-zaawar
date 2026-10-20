@@ -15,7 +15,6 @@ const outbox = mkdtempSync(path.join(tmpdir(), "mail-outbox-"));
 Object.assign(process.env, {
   MAIL_OUTBOX_DIR: outbox,
   MAIL_TO: "final@example.test",
-  MECHANIC_TO: "mechanic1@example.test, mechanic2@example.test",
   MECHANIC_LINK_SECRET: "test-secret-0123456789abcdef",
   MECHANIC_PASSWORD: "test-password",
   MECHANIC_STORE_FILE: path.join(outbox, "store", "submissions.json"),
@@ -32,7 +31,6 @@ const { BLAST_CHECKLIST, inspectionSheetFor } = await import("../api/_trips.js")
 
 // A 1x1 white PNG stands in for both signatures.
 const PNG = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/x8AAwMCAO+ip1sAAAAASUVORK5CYII=";
-const ORIGIN = "https://et-zaawar.example";
 
 const employees = [{ name: "Бат-Эрдэнэ", position: "Инженер", phone: "99112233" }];
 
@@ -117,7 +115,20 @@ function newMail() {
 }
 
 const header = (eml, name) => new RegExp(`^${name}: (.*)$`, "mi").exec(eml)?.[1] ?? "";
-const linkToken = (html) => /href="[^"]*#mechanic=([^"]+)"/.exec(html)?.[1];
+/** The /mechanic link token of the stored submission with this id. */
+async function tokenOf(id) {
+  const { body } = await listForMechanic({ password: "test-password" });
+  return body.records.find((record) => record.id === id)?.token;
+}
+
+/** Submits a trip that needs the mechanic; returns its token. Sends no email. */
+async function submitForMechanic(form) {
+  const r = await sendFormMail({ form, employees, signature: PNG, signatureThumb: PNG });
+  assert.equal(r.status, 200, JSON.stringify(r.body));
+  assert.equal(r.body.stage, "mechanic");
+  assert.equal(newMail().length, 0, "nothing is emailed until the mechanic checks it");
+  return tokenOf(r.body.id);
+}
 
 const results = [];
 async function test(name, fn) {
@@ -131,8 +142,7 @@ async function test(name, fn) {
 
 await test("АТҮТ goes straight to the final recipients", async () => {
   const r = await sendFormMail(
-    { form: travel("АТҮТ / Нийтийн тээвэр", { driver: "", driverPhone: "", vehicle: "", starlink: "", gps: "" }), employees, signature: PNG },
-    { origin: ORIGIN }
+    { form: travel("АТҮТ / Нийтийн тээвэр", { driver: "", driverPhone: "", vehicle: "", starlink: "", gps: "" }), employees, signature: PNG }
   );
   assert.equal(r.status, 200, JSON.stringify(r.body));
   assert.equal(r.body.stage, "final");
@@ -140,35 +150,22 @@ await test("АТҮТ goes straight to the final recipients", async () => {
   assert.equal(mail.length, 1);
   assert.match(header(mail[0].eml, "To"), /final@example\.test/);
   assert.doesNotMatch(mail[0].eml, /mechanic\d@example/);
-  assert.equal(linkToken(mail[0].html), undefined, "final email must not carry a mechanic link");
 });
 
 let companyToken;
-await test("Company vehicle goes to the mechanics with a link", async () => {
-  const r = await sendFormMail(
-    { form: travel("Байгууллагын унаагаар"), employees, signature: PNG, signatureThumb: PNG },
-    { origin: ORIGIN }
-  );
-  assert.equal(r.status, 200, JSON.stringify(r.body));
-  assert.equal(r.body.stage, "mechanic");
-  const [mail, ...rest] = newMail();
-  assert.equal(rest.length, 0);
-  assert.match(header(mail.eml, "To"), /mechanic1@example\.test, mechanic2@example\.test/);
-  assert.doesNotMatch(mail.eml, /final@example/, "final recipients must not get it yet");
-  companyToken = linkToken(mail.html);
-  assert.ok(companyToken, "mechanic email has a link");
-  assert.ok(mail.html.includes(`${ORIGIN}/mechanic#mechanic=`));
+await test("Company vehicle goes to the /mechanic list, with no email", async () => {
+  companyToken = await submitForMechanic(travel("Байгууллагын унаагаар"));
+  assert.ok(companyToken, "listed on /mechanic");
 });
 
 await test("Other transports (Замын унаа, Хувийн, Гэрээт, Бусад) also go to the mechanics", async () => {
   for (const transport of ["Замын унаа", "Хувийн унаа", "Гэрээт компаний унаа", "Бусад"]) {
     const r = await sendFormMail(
-      { form: travel(transport), employees, signature: PNG, signatureThumb: PNG },
-      { origin: ORIGIN }
+      { form: travel(transport), employees, signature: PNG, signatureThumb: PNG }
     );
     assert.equal(r.body.stage, "mechanic", `${transport}: ${JSON.stringify(r.body)}`);
   }
-  assert.equal(newMail().length, 4);
+  assert.equal(newMail().length, 0);
 });
 
 await test("Mechanic page loads the submission from the link", async () => {
@@ -201,15 +198,10 @@ await test("Mechanic pass sends form + inspection to the final recipients", asyn
   assert.match(mail.html, /cid:signature/);
   assert.match(mail.html, /cid:mechanic-signature/);
   assert.equal((mail.eml.match(/Content-ID:/g) || []).length, 2, "both signatures attached");
-  assert.equal(linkToken(mail.html), undefined);
 });
 
 await test("Blasting trip always goes to the mechanics, and a fail is reported", async () => {
-  const r = await sendFormMail({ form: blast, employees, signature: PNG, signatureThumb: PNG }, { origin: ORIGIN });
-  assert.equal(r.body.stage, "mechanic", JSON.stringify(r.body));
-  const [mail] = newMail();
-  assert.match(header(mail.eml, "To"), /mechanic1@example\.test/);
-  const token = linkToken(mail.html);
+  const token = await submitForMechanic(blast);
 
   const done = await handleMechanic({
     token,
@@ -241,8 +233,7 @@ await test("Tampered or forged links are rejected", async () => {
 
 await test("Incomplete inspections are rejected", async () => {
   // A fresh form: the one above was already checked, so it would get 409.
-  await sendFormMail({ form: travel("Байгууллагын унаагаар"), employees, signature: PNG, signatureThumb: PNG }, { origin: ORIGIN });
-  const freshToken = linkToken(newMail()[0].html);
+  const freshToken = await submitForMechanic(travel("Байгууллагын унаагаар"));
   const base = inspectionFor(travel("Байгууллагын унаагаар"));
   const { ["3.2"]: _, ...missingItem } = base.items;
   const cases = [
@@ -265,11 +256,7 @@ await test("/mechanic lists submissions behind the password, and a checked form 
   assert.equal((await listForMechanic({ password: "wrong" })).status, 401);
   assert.equal((await listForMechanic({})).status, 401);
 
-  const r = await sendFormMail({ form: travel("Хувийн унаа"), employees, signature: PNG, signatureThumb: PNG }, { origin: ORIGIN });
-  assert.equal(r.body.stage, "mechanic");
-  const [mail] = newMail();
-  const token = linkToken(mail.html);
-  assert.ok(mail.html.includes(`${ORIGIN}/mechanic#mechanic=`), "email links to the /mechanic page");
+  const token = await submitForMechanic(travel("Хувийн унаа"));
 
   const list = await listForMechanic({ password: "test-password" });
   assert.equal(list.status, 200, JSON.stringify(list.body));
@@ -294,8 +281,7 @@ await test("/mechanic lists submissions behind the password, and a checked form 
 });
 
 await test("If the final email fails, the form goes back to waiting", async () => {
-  await sendFormMail({ form: travel("Замын унаа"), employees, signature: PNG, signatureThumb: PNG }, { origin: ORIGIN });
-  const token = linkToken(newMail()[0].html);
+  const token = await submitForMechanic(travel("Замын унаа"));
 
   // An outbox path under a file cannot be created, so delivery fails.
   const saved = process.env.MAIL_OUTBOX_DIR;
@@ -321,7 +307,7 @@ await test("New trip-sheet fields are required", async () => {
     [{ ...blast, blackBox: "" }, "blast blackBox"],
     [{ ...blast, vehicleOwner: "" }, "blast vehicleOwner"]
   ]) {
-    const r = await sendFormMail({ form, employees, signature: PNG, signatureThumb: PNG }, { origin: ORIGIN });
+    const r = await sendFormMail({ form, employees, signature: PNG, signatureThumb: PNG });
     assert.equal(r.status, 400, field);
   }
   assert.equal(newMail().length, 0);
@@ -329,12 +315,12 @@ await test("New trip-sheet fields are required", async () => {
 
 await test("Mechanic route refuses to run without its configuration", async () => {
   const form = travel("Байгууллагын унаагаар");
-  const saved = process.env.MECHANIC_TO;
-  process.env.MECHANIC_TO = "";
-  const r = await sendFormMail({ form, employees, signature: PNG, signatureThumb: PNG }, { origin: ORIGIN });
-  process.env.MECHANIC_TO = saved;
+  const saved = process.env.MECHANIC_LINK_SECRET;
+  process.env.MECHANIC_LINK_SECRET = "";
+  const r = await sendFormMail({ form, employees, signature: PNG, signatureThumb: PNG });
+  process.env.MECHANIC_LINK_SECRET = saved;
   assert.equal(r.status, 500);
-  const noThumb = await sendFormMail({ form, employees, signature: PNG }, { origin: ORIGIN });
+  const noThumb = await sendFormMail({ form, employees, signature: PNG });
   assert.equal(noThumb.status, 400);
   assert.equal(newMail().length, 0);
 });

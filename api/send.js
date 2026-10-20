@@ -1,5 +1,4 @@
 import { sendFormMail } from "./_form-mail.js";
-import { originOf } from "./_http.js";
 
 /** Vercel serverless entry point for POST /api/send. */
 export default async function handler(req, res) {
@@ -18,7 +17,7 @@ export default async function handler(req, res) {
     }
   }
 
-  const { status, body } = await sendFormMail(payload, { origin: originOf(req) });
+  const { status, body } = await sendFormMail(payload);
 
   return res.status(status).json(body);
 }
