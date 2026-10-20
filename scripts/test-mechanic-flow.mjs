@@ -296,6 +296,22 @@ await test("If the final email fails, the form goes back to waiting", async () =
   assert.equal(newMail().length, 1);
 });
 
+await test("Without email settings, employees can still send to /mechanic; only email steps fail", async () => {
+  const saved = process.env.MAIL_OUTBOX_DIR;
+  delete process.env.MAIL_OUTBOX_DIR;
+  try {
+    const token = await submitForMechanic(travel("Байгууллагын унаагаар"));
+    assert.ok(token, "employee submit accepted and listed");
+    const atut = await sendFormMail({ form: travel("АТҮТ / Нийтийн тээвэр", { driver: "", driverPhone: "", vehicle: "", starlink: "", gps: "" }), employees, signature: PNG });
+    assert.equal(atut.status, 500, "АТҮТ emails directly, so it needs the settings");
+    const mechanic = await handleMechanic({ token, inspection: inspectionFor(travel("Байгууллагын унаагаар")), signature: PNG });
+    assert.equal(mechanic.status, 500, "mechanic submit needs the settings");
+  } finally {
+    process.env.MAIL_OUTBOX_DIR = saved;
+  }
+  assert.equal(newMail().length, 0);
+});
+
 await test("New trip-sheet fields are required", async () => {
   for (const [form, field] of [
     [travel("Байгууллагын унаагаар", { leader: "" }), "leader"],

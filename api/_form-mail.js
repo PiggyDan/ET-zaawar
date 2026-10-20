@@ -611,12 +611,13 @@ export async function sendFormMail(payload) {
     return { status: 400, body: { error: signature.error } };
   }
 
-  // Checked up front even for the mechanic route, whose email is only sent
-  // later, so a form is never accepted that could not be delivered.
-  const configError = mailConfigError();
-  if (configError) return configError;
-
-  if (!needsMechanic(form)) return sendFinal(form, employees, signature);
+  // Only public-transport trips email now; the mechanic route emails when
+  // the mechanic submits, and that step checks the mail settings.
+  if (!needsMechanic(form)) {
+    const configError = mailConfigError();
+    if (configError) return configError;
+    return sendFinal(form, employees, signature);
+  }
 
   // The small signature copy is what reaches the final email.
   const thumb = parseSignature(payload?.signatureThumb, { maxBytes: MAX_THUMB_BYTES });
