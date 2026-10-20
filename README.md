@@ -14,9 +14,11 @@ npm run dev
 
 Submitting POSTs to `/api/send`, which mails the form to:
 
-- it@gkllc.mn
-- admin@gkllc.mn
-- share@gkllc.mn
+- delgermurun.e@erkhettunsh.com
+- lkhagvabazar@erkhettunsh.com
+- uyanga@erkhettunsh.com
+- ulziitsetseg.kh@erkhettunsh.com
+- hr@erkhettunsh.com
 
 Override the list with `MAIL_TO` (comma-separated) if needed.
 

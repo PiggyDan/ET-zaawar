@@ -36,10 +36,11 @@ import { hasLinkSecret, signToken, verifyToken } from "./_link-token.js";
 import { getStore, listRecords } from "./_store.js";
 
 const DEFAULT_RECIPIENTS = [
-  "zasaginfo@gmail.com",
-  "zcm.hse.bilgee@gmail.com",
-  "hse.zcm@erkhettunsh.com",
-  "battseren@srmongolia.mn"
+  "delgermurun.e@erkhettunsh.com",
+  "lkhagvabazar@erkhettunsh.com",
+  "uyanga@erkhettunsh.com",
+  "ulziitsetseg.kh@erkhettunsh.com",
+  "hr@erkhettunsh.com"
 ];
 
 // Resend only delivers to arbitrary addresses from a verified domain.
