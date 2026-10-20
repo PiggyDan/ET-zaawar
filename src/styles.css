@@ -1110,3 +1110,14 @@ a.inboxItem:focus-visible { border-color: var(--brand); }
 }
 
 .successScreen .backLink { margin-top: 18px; }
+
+/* ---------- Footer ---------- */
+
+.siteFooter {
+  max-width: 560px;
+  margin: 0 auto;
+  padding: 20px 16px calc(24px + env(safe-area-inset-bottom));
+  color: var(--muted);
+  font-size: 12px;
+  text-align: center;
+}

@@ -970,9 +970,16 @@ function Root() {
     return () => window.removeEventListener("hashchange", onHashChange);
   }, []);
 
-  if (mechanicToken()) return <MechanicForm key={hash} />;
-  if (window.location.pathname.replace(/\/+$/, "") === "/mechanic") return <MechanicInbox />;
-  return <App />;
+  const page = mechanicToken()
+    ? <MechanicForm key={hash} />
+    : window.location.pathname.replace(/\/+$/, "") === "/mechanic" ? <MechanicInbox /> : <App />;
+
+  return (
+    <>
+      {page}
+      <footer className="siteFooter">Powered by Daniel Knight</footer>
+    </>
+  );
 }
 
 createRoot(document.getElementById("root")).render(<Root />);
