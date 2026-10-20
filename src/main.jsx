@@ -1,7 +1,10 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
+  AlertTriangle,
+  BadgeCheck,
   Bomb,
+  CalendarClock,
   Car,
   Check,
   CheckCircle2,
@@ -15,14 +18,38 @@ import {
   Send,
   ShieldCheck,
   Trash2,
+  UserRound,
   Users
 } from "lucide-react";
-import companyLogo from "./assets/logos/erkhet-tunsh.svg";
 import "./styles.css";
 import SafetyReader from "./SafetyReader";
-import { BLAST_TRIP, NORMAL_TRIP, TRIP_TYPES, checklistFor } from "../api/_trips.js";
+import MechanicForm, { mechanicToken } from "./MechanicForm";
+import MechanicInbox from "./MechanicInbox";
+import { AppBar, ChoiceField, Field, Section, readScaledImage, scaleDataUrl } from "./ui";
+import {
+  BLAST_TRIP,
+  NORMAL_TRIP,
+  PUBLIC_TRANSPORT,
+  TRIP_TYPES,
+  VEHICLE_OWNERS,
+  YES,
+  YES_NO,
+  checklistFor,
+  needsMechanic,
+  validateBlast,
+  validateTravel
+} from "../api/_trips.js";
 
 const emptyEmployee = () => ({ name: "", position: "", phone: "" });
+
+/** Passenger rows on the Аяллын хуудас; the blasting team stays small. */
+const MAX_PASSENGERS = { [NORMAL_TRIP]: 18, [BLAST_TRIP]: 4 };
+
+// Read in "Зааварчилгаа PDF унших". Each annex file's Аяллын хуудас (page 1)
+// is replaced by the web form, and its Авто машин үзлэгийн хуудас (travel
+// page 5, blasting page 2) by the mechanic's form, so both are left out.
+const TRAVEL_DOCUMENTS = [{ file: "travel-annexes.pdf", from: 2, to: 4 }];
+const BLAST_DOCUMENTS = [{ file: "blasting-annexes.pdf", from: 3 }];
 
 const companyOptions = [
   { value: "ЭРХЭТ ТҮНШ ХХК" },
@@ -37,15 +64,31 @@ const initialForm = (tripType = NORMAL_TRIP, company = companyOptions[0].value) 
   company,
   tripType,
   department: "",
+  leader: "",
+  leaderPosition: "",
+  leaderPhone: "",
+  purpose: "",
   travelDate: "",
+  departTime: "",
+  returnDate: "",
+  returnTime: "",
   direction: "",
   otherDirection: "",
+  route: "",
   transport: "Байгууллагын унаагаар",
   driver: "",
   driverPhone: "",
+  driverAck: "",
   vehicle: "",
   vehiclePlate: "",
-  departTime: "",
+  vehicleOwner: "",
+  starlink: "",
+  gps: "",
+  blackBox: "",
+  approver: "",
+  approverPosition: "",
+  instructor: "",
+  instructorPosition: "",
   routeFrom: "",
   routeTo: "",
   permitNo: "",
@@ -61,63 +104,6 @@ const initialForm = (tripType = NORMAL_TRIP, company = companyOptions[0].value) 
 
 const digitsOnly = (value) => value.replace(/[^0-9]/g, "");
 
-const SIGNATURE_MAX_EDGE = 900;
-
-/**
- * Reads a signature image and scales it down, so a phone photo does not
- * exceed the request body limit once base64-encoded.
- */
-function readScaledImage(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-
-    reader.onerror = () => reject(new Error("read failed"));
-    reader.onload = () => {
-      const dataUrl = reader.result;
-      const image = new Image();
-
-      image.onerror = () => reject(new Error("decode failed"));
-      image.onload = () => {
-        const scale = Math.min(
-          1,
-          SIGNATURE_MAX_EDGE / Math.max(image.width, image.height)
-        );
-
-        if (scale === 1 && dataUrl.length < 700_000) {
-          resolve(dataUrl);
-          return;
-        }
-
-        const canvas = document.createElement("canvas");
-        canvas.width = Math.round(image.width * scale);
-        canvas.height = Math.round(image.height * scale);
-
-        const context = canvas.getContext("2d");
-        context.fillStyle = "#ffffff";
-        context.fillRect(0, 0, canvas.width, canvas.height);
-        context.drawImage(image, 0, 0, canvas.width, canvas.height);
-
-        resolve(canvas.toDataURL("image/jpeg", 0.85));
-      };
-
-      image.src = dataUrl;
-    };
-
-    reader.readAsDataURL(file);
-  });
-}
-
-function CompanyLogo() {
-  return (
-    <img
-      src={companyLogo}
-      alt="Лого"
-      className="companyLogoSvg"
-      draggable="false"
-    />
-  );
-}
-
 function App() {
   const [employees, setEmployees] = useState([emptyEmployee()]);
   const [showSafety, setShowSafety] = useState(false);
@@ -131,8 +117,9 @@ function App() {
   const [checklist, setChecklist] = useState([]);
 
   const isBlast = form.tripType === BLAST_TRIP;
-  const isPublicTransport = !isBlast && form.transport === "АТҮТ / Нийтийн тээвэр";
+  const isPublicTransport = !isBlast && form.transport === PUBLIC_TRANSPORT;
   const activeChecklist = checklistFor(form);
+  const maxPassengers = MAX_PASSENGERS[form.tripType];
 
   const updateForm = (e) =>
     setForm({ ...form, [e.target.name]: e.target.value });
@@ -140,10 +127,13 @@ function App() {
   const updateDigits = (e) =>
     setForm({ ...form, [e.target.name]: digitsOnly(e.target.value) });
 
+  const setField = (name, value) => setForm({ ...form, [name]: value });
+
   // Switching between the travel and blasting forms starts the new form
   // fresh, so fields from the other form are never submitted.
-  const changeTripType = (e) => {
-    setForm(initialForm(e.target.value, form.company));
+  const changeTripType = (tripType) => {
+    setForm(initialForm(tripType, form.company));
+    setEmployees(employees.slice(0, MAX_PASSENGERS[tripType]));
     setChecklist([]);
     setAccepted(false);
     setShowSafety(false);
@@ -163,7 +153,7 @@ function App() {
   };
 
   const addEmployee = () => {
-    if (employees.length < 4) {
+    if (employees.length < maxPassengers) {
       setEmployees([...employees, emptyEmployee()]);
     }
   };
@@ -173,45 +163,25 @@ function App() {
     setEmployees(employees.filter((_, i) => i !== index));
   };
 
+  /** The form as the server expects it. */
+  const payloadForm = () => ({
+    ...form,
+    driver: isPublicTransport ? "" : form.driver,
+    driverPhone: isPublicTransport ? "" : form.driverPhone,
+    vehicle: isPublicTransport ? "" : `${form.vehicle.trim()}, ${form.vehiclePlate.trim()}`,
+    vehiclePlate: isPublicTransport ? "" : form.vehiclePlate,
+    starlink: isPublicTransport ? "" : form.starlink,
+    gps: isPublicTransport ? "" : form.gps,
+    checklist: activeChecklist.filter((item) => checklist.includes(item))
+  });
+
   const submit = async (e) => {
     e.preventDefault();
 
     if (sending) return;
 
-    const missing = [];
-    const plateValid = /^[0-9]{4} [А-ЯӨҮЁ]{3}$/.test(form.vehiclePlate.trim());
-
-    if (isBlast) {
-      if (!form.travelDate) missing.push("Тээвэрлэх өдөр");
-      if (!form.departTime) missing.push("Гарах цаг");
-      if (!form.routeFrom.trim()) missing.push("Хаанаас");
-      if (!form.routeTo.trim()) missing.push("Хаашаа");
-      if (!form.permitNo.trim()) missing.push("Зөвшөөрлийн дугаар");
-      if (!form.explosiveType.trim()) missing.push("Тэсрэх бодисын төрөл");
-      if (!/^[0-9]+([.,][0-9]+)?$/.test(form.explosiveQty)) missing.push("Тэсрэх бодисын хэмжээ (кг)");
-      if (!form.driver.trim()) missing.push("Жолоочийн нэр");
-      if (!/^[0-9]+$/.test(form.driverPhone)) missing.push("Жолоочийн утасны дугаар");
-      if (!form.vehicle.trim()) missing.push("Автомашины марк");
-      if (!plateValid) missing.push("Улсын дугаар (9911 УБА)");
-      if (!form.escort.trim()) missing.push("Дагалдан хамгаалагч");
-      if (!/^[0-9]+$/.test(form.escortPhone)) missing.push("Хамгаалагчийн утас");
-      if (!form.blaster.trim()) missing.push("Хариуцсан тэсэлгээчин");
-      if (!/^[0-9]+$/.test(form.blasterPhone)) missing.push("Тэсэлгээчний утас");
-    } else {
-    if (!isPublicTransport) {
-    if (!form.driver.trim()) missing.push("Жолоочийн нэр");
-    if (!/^[0-9]+$/.test(form.driverPhone)) missing.push("Жолоочийн утасны дугаар");
-    if (!form.vehicle.trim()) missing.push("Автомашины марк");
-    if (!plateValid) missing.push("Улсын дугаар (9911 УБА)");
-
-    }
-
-    if (!form.department.trim()) missing.push("Харьяалагдах хэлтэс");
-    if (!form.travelDate) missing.push("Аялах өдөр");
-    if (!form.direction) missing.push("Аялах чиглэл");
-    if (form.direction === "Бусад" && !form.otherDirection.trim()) missing.push("Бусад явах чиглэл");
-    if (!form.transport.trim()) missing.push("Аялах тээврийн хэрэгсэл");
-    }
+    const sent = payloadForm();
+    const missing = isBlast ? validateBlast(sent) : validateTravel(sent);
 
     if (!activeChecklist.every((item) => checklist.includes(item))) missing.push("Шалгах хуудас");
 
@@ -232,22 +202,22 @@ function App() {
     setSending(true);
 
     try {
+      // A small copy of the signature rides in the mechanic's link, so it
+      // can reach the final email without a database.
+      const signatureThumb = needsMechanic(form)
+        ? await scaleDataUrl(signature, 320, { quality: 0.6, force: true })
+        : undefined;
+
       const response = await fetch("/api/send", {
         method: "POST",
         headers: {
           "Content-Type": "application/json"
         },
         body: JSON.stringify({
-          form: {
-            ...form,
-            driver: isPublicTransport ? "" : form.driver,
-            driverPhone: isPublicTransport ? "" : form.driverPhone,
-            vehicle: isPublicTransport ? "" : `${form.vehicle.trim()}, ${form.vehiclePlate.trim()}`,
-            vehiclePlate: isPublicTransport ? "" : form.vehiclePlate,
-            checklist: activeChecklist.filter((item) => checklist.includes(item))
-          },
+          form: sent,
           employees,
-          signature
+          signature,
+          signatureThumb
         })
       });
 
@@ -257,7 +227,7 @@ function App() {
         throw new Error(data.error || "Failed to send the form.");
       }
 
-      setSubmitted(true);
+      setSubmitted(data.stage || "final");
       setAccepted(false);
       setSignature("");
       setEmployees([emptyEmployee()]);
@@ -292,7 +262,11 @@ function App() {
             <CheckCircle2 size={44} strokeWidth={2.2} />
           </div>
           <h2>Амжилттай илгээгдлээ</h2>
-          <p>Аяллын мэдээлэл бүртгэгдэж, хариуцсан ажилтнуудад илгээгдлээ.</p>
+          <p>
+            {submitted === "mechanic"
+              ? "Маягт механикт илгээгдлээ. Механик тээврийн хэрэгслийг шалгаж баталгаажуулсны дараа хариуцсан ажилтнуудад очно."
+              : "Аяллын мэдээлэл бүртгэгдэж, хариуцсан ажилтнуудад илгээгдлээ."}
+          </p>
           <button type="button" className="secondaryBtn" onClick={() => setSubmitted(false)}>
             <RotateCcw size={18} /> Шинэ маягт бөглөх
           </button>
@@ -306,7 +280,7 @@ function App() {
       <AppBar />
       <div className="formCard">
         <header className={`hero${isBlast ? " hero--blast" : ""}`}>
-          <span className="heroChip">Хувилбар 01</span>
+          <span className="heroChip">Аяллын хуудас</span>
           <h1>
             {isBlast
               ? "Тэсрэх бодис тээвэрлэх үеийн"
@@ -324,12 +298,17 @@ function App() {
                 role="radio"
                 aria-checked={form.tripType === tripType}
                 className={form.tripType === tripType ? "active" : ""}
-                onClick={() => form.tripType !== tripType && changeTripType({ target: { value: tripType } })}
+                onClick={() => form.tripType !== tripType && changeTripType(tripType)}
               >
                 {tripType === BLAST_TRIP ? <Bomb size={17} /> : <Car size={17} />}
                 {tripType}
               </button>
             ))}
+          </div>
+
+          <div className="notice" role="note">
+            <AlertTriangle size={18} aria-hidden="true" />
+            <span><strong>АНХААР:</strong> Аялал эхлэх цаг хүйтний улирал 06:00, дулааны улирал 05:00 байна.</span>
           </div>
 
           <Section title="Үндсэн мэдээлэл" icon={<Info size={18} />}>
@@ -343,9 +322,7 @@ function App() {
               </select>
             </Field>
 
-            {isBlast ? (
-              <BlastBasicFields form={form} updateForm={updateForm} />
-            ) : (<>
+            {!isBlast && (
             <Field label="Харьяалагдах хэлтэс *">
               <select
                 required
@@ -367,56 +344,115 @@ function App() {
                 <option value="Бусад">Бусад</option>
               </select>
             </Field>
+            )}
 
-            <Field label="Аялах өдөр *">
+            <Field label="Аяллын зорилго *">
               <input
                 required
-                type="date"
-                name="travelDate"
-                value={form.travelDate}
+                name="purpose"
+                value={form.purpose}
                 onChange={updateForm}
+                placeholder={isBlast ? "Жишээ: Блок 3-ын тэсэлгээнд тэсрэх бодис хүргэх" : "Жишээ: Уурхайн ээлжинд ажиллах"}
               />
             </Field>
 
-            <Field label="Аялах чиглэл *">
-              <select
-                required
-                name="direction"
-                value={form.direction}
-                onChange={updateForm}
-              >
-                <option value="">Сонгох</option>
-                <option>Улаанбаатар-Сайншанд</option>
-                <option>Улаанбаатар-Чандмань уул төмрийн хүдрийн уурхай</option>
-                <option>Улаанбаатар-Дэлгэрэх сум</option>
-                <option>Улаанбаатар-Гурвантэс</option>
-                <option>Сайншанд-Чандмань уул төмрийн хүдрийн уурхай</option>
-                <option>Сайншанд-Дэлгэрэх сум</option>
-                <option>Сайншанд-Улаанбаатар</option>
-                <option>Сайншанд-Гурвантэс</option>
-                <option>Гурвантэс-Улаанбаатар</option>
-                <option>Гурвантэс-Сайншанд</option>
-                <option>Чандмань уул төмрийн уурхай-Улаанбаатар</option>
-                <option>Чандмань уул төмрийн уурхай-Сайншанд</option>
-                <option>Чандмань уул төмрийн уурхай-Чойр</option>
-                <option>Чандмань уул төмрийн уурхай-Гурвантэс</option>                  
-                <option>Бусад</option>
-              </select>
-            </Field>
+            {isBlast && <BlastBasicFields form={form} updateForm={updateForm} />}
+          </Section>
 
-            {form.direction === "Бусад" && (
-              <Field label="Бусад явах чиглэл *">
+          {!isBlast && (
+            <Section title="Аяллын ахлагч" icon={<UserRound size={18} />}>
+              <div className="twoCols">
+                <Field label="Овог нэр *">
+                  <input required name="leader" value={form.leader} onChange={updateForm} placeholder="Овог нэр" />
+                </Field>
+                <Field label="Албан тушаал *">
+                  <input required name="leaderPosition" value={form.leaderPosition} onChange={updateForm} placeholder="Албан тушаал" />
+                </Field>
+              </div>
+              <Field label="Утасны дугаар *">
                 <input
                   required
-                  name="otherDirection"
-                  value={form.otherDirection}
-                  onChange={updateForm}
-                  placeholder="Жишээ: Гурвантэс - Даланзадгад"
+                  name="leaderPhone"
+                  type="tel"
+                  inputMode="numeric"
+                  pattern="[0-9]+"
+                  value={form.leaderPhone}
+                  onChange={updateDigits}
+                  placeholder="Жишээ: 99112233"
                 />
               </Field>
-            )}
-            </>)}
-          </Section>
+            </Section>
+          )}
+
+          {!isBlast && (
+            <Section title="Аяллын хугацаа ба маршрут" icon={<CalendarClock size={18} />}>
+              <div className="twoCols">
+                <Field label="Аялал эхлэх огноо *">
+                  <input required type="date" name="travelDate" value={form.travelDate} onChange={updateForm} />
+                </Field>
+                <Field label="Эхлэх цаг *">
+                  <input required type="time" name="departTime" value={form.departTime} onChange={updateForm} />
+                </Field>
+              </div>
+              <div className="twoCols">
+                <Field label="Аялал дуусах огноо *">
+                  <input required type="date" name="returnDate" min={form.travelDate || undefined} value={form.returnDate} onChange={updateForm} />
+                </Field>
+                <Field label="Дуусах цаг *">
+                  <input required type="time" name="returnTime" value={form.returnTime} onChange={updateForm} />
+                </Field>
+              </div>
+
+              <Field label="Аялах чиглэл *">
+                <select
+                  required
+                  name="direction"
+                  value={form.direction}
+                  onChange={updateForm}
+                >
+                  <option value="">Сонгох</option>
+                  <option>Улаанбаатар-Сайншанд</option>
+                  <option>Улаанбаатар-Чандмань уул төмрийн хүдрийн уурхай</option>
+                  <option>Улаанбаатар-Дэлгэрэх сум</option>
+                  <option>Улаанбаатар-Гурвантэс</option>
+                  <option>Сайншанд-Чандмань уул төмрийн хүдрийн уурхай</option>
+                  <option>Сайншанд-Дэлгэрэх сум</option>
+                  <option>Сайншанд-Улаанбаатар</option>
+                  <option>Сайншанд-Гурвантэс</option>
+                  <option>Гурвантэс-Улаанбаатар</option>
+                  <option>Гурвантэс-Сайншанд</option>
+                  <option>Чандмань уул төмрийн уурхай-Улаанбаатар</option>
+                  <option>Чандмань уул төмрийн уурхай-Сайншанд</option>
+                  <option>Чандмань уул төмрийн уурхай-Чойр</option>
+                  <option>Чандмань уул төмрийн уурхай-Гурвантэс</option>
+                  <option>Бусад</option>
+                </select>
+              </Field>
+
+              {form.direction === "Бусад" && (
+                <Field label="Бусад явах чиглэл *">
+                  <input
+                    required
+                    name="otherDirection"
+                    value={form.otherDirection}
+                    onChange={updateForm}
+                    placeholder="Жишээ: Гурвантэс - Даланзадгад"
+                  />
+                </Field>
+              )}
+
+              <Field label="Аяллын маршрут *">
+                <textarea
+                  required
+                  rows={3}
+                  name="route"
+                  value={form.route}
+                  onChange={updateForm}
+                  placeholder="Хаанаас хаана хүрэх, амрах суурин газрын нэр, буцах чиглэл, төв суурин газрын нэрийг тодорхой бичнэ үү."
+                />
+              </Field>
+            </Section>
+          )}
 
           {isBlast && (
             <BlastMaterialSection form={form} updateForm={updateForm} updateDigits={updateDigits} />
@@ -433,8 +469,8 @@ function App() {
                 <option>Байгууллагын унаагаар</option>
                 <option>Замын унаа</option>
                 <option>Хувийн унаа</option>
-                <option>АТҮТ / Нийтийн тээвэр</option>
-                <option>Гэрээт компаний унаа</option>                
+                <option>{PUBLIC_TRANSPORT}</option>
+                <option>Гэрээт компаний унаа</option>
                 <option>Бусад</option>
               </select>
             </Field>
@@ -445,21 +481,62 @@ function App() {
             )}
 
             {isBlast && (
-              <BlastEscortFields form={form} updateForm={updateForm} updateDigits={updateDigits} />
+              <ChoiceField label="Тээврийн хэрэгслийн харьяалал *" options={VEHICLE_OWNERS} value={form.vehicleOwner} onChange={(value) => setField("vehicleOwner", value)} />
+            )}
+
+            {!isPublicTransport && (
+              <>
+                <ChoiceField label="Сансарын хөдөлгөөнт интернэт (Starlink) хэвийн эсэх *" options={YES_NO} value={form.starlink} onChange={(value) => setField("starlink", value)} />
+                <ChoiceField label="Байршил тогтоогч, хурд хэмжигч (GPS) хэвийн эсэх *" options={YES_NO} value={form.gps} onChange={(value) => setField("gps", value)} />
+              </>
+            )}
+
+            {isBlast && (
+              <>
+                <ChoiceField label="Хар хайрцаг буюу хяналтын тоног төхөөрөмж хэвийн эсэх *" options={YES_NO} value={form.blackBox} onChange={(value) => setField("blackBox", value)} />
+                <BlastEscortFields form={form} updateForm={updateForm} updateDigits={updateDigits} />
+              </>
             )}
           </Section>
 
+          {isBlast && (
+            <Section title="Жолоочийн ажиллагааны заавар" icon={<ShieldCheck size={18} />}>
+              <ol className="ruleList">
+                <li>Жолооч техникийн бүрэн бүтэн байдал, ачааны татлага, лац ломбо болон тэвшний хаалга хаалтуудад бүрэн хяналт тавих.</li>
+                <li>Тэсрэх материалын тээвэрлэлтийг Цагдаагийн Ерөнхий газрын Бүртгэл, хяналтын төвөөс баталсан маршрутын дагуу заавал хөтчийн хамт гүйцэтгэнэ.</li>
+                <li>Тээврийн хэрэгсэл нь шатахуунаар хүрэлцэхүйц цэнэглэгдсэн байна. Зайлшгүй шаардлагаар уурхайгаас бусад газарт цэнэглэх бол хот, суурин газрын захад, маршрутад тусгагдсан шатахуун түгээх станцаас цэнэглэх.</li>
+                <li>Тээвэрлэх үед тээврийн хэрэгслээс 100 метрээс ойр зайд тамхи татах, ил гал гаргахыг хориглоно.</li>
+                <li>Аянга цахилгаантай бороотой үед хөдөлгөөнийг зогсоож, ой мод, хавцал, жалга, хот суурин газраас 200 м, машин хооронд 50 м-ээс багагүй зайд замын баруун талд байрлуулж, урд хойно 100 м-т "Ослын зогсолтын тэмдэг" тавьж, 200 м-ээс багагүй зайнаас хянана.</li>
+              </ol>
+              <label className="checkRow accept">
+                <input
+                  type="checkbox"
+                  checked={form.driverAck === YES}
+                  onChange={(e) => setField("driverAck", e.target.checked ? YES : "")}
+                />
+                <span className="checkMark" aria-hidden="true"><Check size={14} strokeWidth={3} /></span>
+                <span>Жолооч дээрх зааварчилгаатай танилцсан.</span>
+              </label>
+            </Section>
+          )}
+
           <Section
-            title={isBlast ? "Тэсэлгээний баг" : "Зорчих ажилтан"}
+            title={isBlast ? "Тэсэлгээний баг" : "Зорчигчид"}
             icon={<Users size={18} />}
-            badge={`${employees.length}/4`}
+            badge={`${employees.length}/${maxPassengers}`}
           >
-            <p className="helper">Хамгийн ихдээ 4 ажилтан бүртгэх боломжтой.</p>
+            <p className="helper">Хамгийн ихдээ {maxPassengers} хүн бүртгэх боломжтой.</p>
+
+            {!isBlast && (
+              <p className="ruleNote">
+                <strong>Зорчигчийн аюулгүй ажиллагааны заавар:</strong> Суудлын бүс хэрэглэнэ. Жолооч, аяллын ахлагчийн тавьж буй шаардлагыг биелүүлнэ. Хөдөлгөөний аюулгүй байдалд сөргөөр нөлөөлөхүйц үйлдэл гаргахыг хориглоно. Түр зогссон үед хөдөлгөөний аюулгүй байдлаа хангаж аливаа эрсдэлтэй үйлдэл хийхийг хориглоно.
+              </p>
+            )}
 
             {employees.map((employee, index) => (
               <div className="employeeCard" key={index}>
                 <div className="employeeHead">
-                  <strong>Ажилтан {index + 1}</strong>
+                  <strong>{isBlast ? "Ажилтан" : "Зорчигч"} {index + 1}</strong>
                   {employees.length > 1 && (
                     <button
                       type="button"
@@ -506,7 +583,7 @@ function App() {
                       pattern="[0-9]+"
                       value={employee.phone}
                       onChange={(e) =>
-                        updateEmployee(index, "phone", e.target.value.replace(/[^0-9]/g, ""))
+                        updateEmployee(index, "phone", digitsOnly(e.target.value))
                       }
                       placeholder="Утас"
                     />
@@ -515,9 +592,9 @@ function App() {
               </div>
             ))}
 
-            {employees.length < 4 && (
+            {employees.length < maxPassengers && (
               <button type="button" className="addBtn" onClick={addEmployee}>
-                <Plus size={17} /> Ажилтан нэмэх
+                <Plus size={17} /> {isBlast ? "Ажилтан нэмэх" : "Зорчигч нэмэх"}
               </button>
             )}
           </Section>
@@ -545,10 +622,34 @@ function App() {
             </Section>
           )}
 
+          <Section title={isBlast ? "Аялал хийх зөвшөөрөл" : "Зөвшөөрөл ба зааварчилгаа"} icon={<BadgeCheck size={18} />}>
+            <p className="helper">
+              {isBlast ? "Аялал хийхийг зөвшөөрсөн албан тушаалтан." : "Аяллыг зөвшөөрсөн болон аюулгүй ажиллагааны зааварчилгаа өгсөн албан тушаалтан."}
+            </p>
+            <div className="twoCols">
+              <Field label="Зөвшөөрсөн: овог нэр *">
+                <input required name="approver" value={form.approver} onChange={updateForm} placeholder="Овог нэр" />
+              </Field>
+              <Field label="Албан тушаал *">
+                <input required name="approverPosition" value={form.approverPosition} onChange={updateForm} placeholder="Албан тушаал" />
+              </Field>
+            </div>
+            {!isBlast && (
+              <div className="twoCols">
+                <Field label="Зааварчилгаа өгсөн: овог нэр *">
+                  <input required name="instructor" value={form.instructor} onChange={updateForm} placeholder="Овог нэр" />
+                </Field>
+                <Field label="Албан тушаал *">
+                  <input required name="instructorPosition" value={form.instructorPosition} onChange={updateForm} placeholder="Албан тушаал" />
+                </Field>
+              </div>
+            )}
+          </Section>
+
           <Section title="Зааварчилгаа ба гарын үсэг" icon={<ShieldCheck size={18} />}>
             <div className="signatureBox">
               <div className="signatureHeader">
-                <span>Гарын үсэг</span>
+                <span>{isBlast ? "Гарын үсэг" : "Аяллын ахлагчийн гарын үсэг"}</span>
                 <label className="uploadSignature">
                   <input type="file" accept="image/*" onChange={handleSignatureUpload} />
                   <span>Зураг сонгох</span>
@@ -578,7 +679,6 @@ function App() {
               {showSafety ? <ChevronUp /> : <ChevronDown />}
             </button>
 
-            {!isBlast && (<>
             <button
               type="button"
               className="safetyDownload"
@@ -587,8 +687,13 @@ function App() {
               <FileText size={18} aria-hidden="true" />
               <span>Зааварчилгаа PDF унших</span>
             </button>
-            {showReader && <SafetyReader onClose={() => setShowReader(false)} />}
-            </>)}
+            {showReader && (
+              <SafetyReader
+                title={isBlast ? "Тэсрэх бодис тээвэрлэх журам" : "Холын аяллын журам"}
+                sources={isBlast ? BLAST_DOCUMENTS : TRAVEL_DOCUMENTS}
+                onClose={() => setShowReader(false)}
+              />
+            )}
 
             {showSafety && isBlast && <BlastSafety />}
 
@@ -626,6 +731,21 @@ function App() {
                 </div>
               </div>
             )}
+
+            <div className="reminder">
+              <strong>Санамж</strong>
+              {isBlast ? (
+                <>
+                  <p>Аялалд гарах болон зорьсон газарт очсон талаарх мэдээллийг ТӨСЛИЙН МЕНЕЖЕРТ мэдэгдэнэ үү (суурин газраас мэдээлнэ).</p>
+                  <p>Тээвэрлэлтийн үед осол гарсан тохиолдолд ослын картад заасан ослын нөхцөлд зайлшгүй авах арга хэмжээнүүдийг яаралтай авч хэрэгжүүлнэ. Яаралтай тусламж: 85006933.</p>
+                </>
+              ) : (
+                <>
+                  <p>Аялалд гарах болон зорьсон газарт очсон талаарх мэдээллийг ХАБЭАБО-ны хэлтсийн удирдлагад мэдэгдэнэ үү (суурин газраас мэдээлнэ).</p>
+                  <p>Аяллын үеийн чиглэл маршрут өөрчлөх, аяллын зорилго өөрчлөгдөх болон аялалтай хамааралтай аливаа шийдвэрийг аяллын ахлагч гаргах бөгөөд аяллын үеийн аюулгүй байдлыг аяллын ахлагч хариуцна. Томилогдсон жолооч нь аяллын ахлагчийн заавар зааварчилгааг биелүүлж ажиллана.</p>
+                </>
+              )}
+            </div>
 
             <label className="checkRow accept">
               <input
@@ -672,7 +792,7 @@ function DriverVehicleFields({ form, setForm, updateForm }) {
           inputMode="numeric"
           pattern="[0-9]+"
           value={form.driverPhone}
-          onChange={(e) => setForm({ ...form, driverPhone: e.target.value.replace(/[^0-9]/g, "") })}
+          onChange={(e) => setForm({ ...form, driverPhone: digitsOnly(e.target.value) })}
           placeholder="Жишээ: 99112233"
         />
       </Field>
@@ -837,40 +957,6 @@ function BlastSafety() {
   );
 }
 
-function AppBar() {
-  return (
-    <div className="appBar">
-      <CompanyLogo />
-      <div>
-        <strong>ЭРХЭТ ТҮНШ ХХК</strong>
-        <span>Аюулгүй ажиллагааны зааварчилгаа</span>
-      </div>
-    </div>
-  );
-}
-
-function Section({ title, icon, badge, children }) {
-  return (
-    <section className="section">
-      <div className="sectionTitle">
-        {icon && <span className="sectionIcon">{icon}</span>}
-        <span>{title}</span>
-        {badge && <span className="sectionBadge">{badge}</span>}
-      </div>
-      <div className="sectionBody">{children}</div>
-    </section>
-  );
-}
-
-function Field({ label, children }) {
-  return (
-    <label className="field">
-      <span>{label}</span>
-      {children}
-    </label>
-  );
-}
-
 function SafetyBlock({ title, children }) {
   return (
     <div className="safetyBlock">
@@ -880,4 +966,22 @@ function SafetyBlock({ title, children }) {
   );
 }
 
-createRoot(document.getElementById("root")).render(<App />);
+/** /mechanic lists waiting forms; a #mechanic=<token> link opens one. */
+function Root() {
+  const [hash, setHash] = useState(window.location.hash);
+
+  useEffect(() => {
+    const onHashChange = () => {
+      setHash(window.location.hash);
+      window.scrollTo(0, 0);
+    };
+    window.addEventListener("hashchange", onHashChange);
+    return () => window.removeEventListener("hashchange", onHashChange);
+  }, []);
+
+  if (mechanicToken()) return <MechanicForm key={hash} />;
+  if (window.location.pathname.replace(/\/+$/, "") === "/mechanic") return <MechanicInbox />;
+  return <App />;
+}
+
+createRoot(document.getElementById("root")).render(<Root />);

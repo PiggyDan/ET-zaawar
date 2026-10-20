@@ -41,10 +41,65 @@ Configured in `.env.local`:
 Set the same variables in the Vercel project settings for production;
 `.env.local` is not deployed.
 
+## Mechanic inspection step
+
+Where the form goes depends on the trip:
+
+- **АТҮТ / Нийтийн тээвэр** — straight to the final recipients (`MAIL_TO`).
+- **Every other transport, and every Тэсэлгээний аялал** — to the mechanics
+  (`MECHANIC_TO`) first. Their email has the full submission and a
+  "Үзлэгийн маягт бөглөх" button. The mechanic fills in the inspection
+  (the official Авто машин үзлэгийн хуудас: every item Хэвийн / Хэвийн бус with Тэмдэглэл, plus Тоо on the blasting sheet; odometer, Тэнцсэн / Тэнцээгүй, Механик дүгнэлт, signature), and that sends the
+  form plus the inspection to the final recipients. A failed inspection is
+  still sent on, marked Тэнцээгүй with the reason.
+
+The submission travels inside the mechanic's link, compressed and signed
+with `MECHANIC_LINK_SECRET`, so it cannot be edited or forged. Links expire
+after 30 days.
+
+### /mechanic page
+
+`/mechanic` lists every form waiting for inspection, plus the ones already
+checked, behind a shared password. Mechanics open a form there or from their
+email; once one is sent, it is marked checked and cannot be sent again.
+
+The list is stored in a private Vercel Blob store on Vercel and in
+`.data/submissions.json` when run locally. To set up Blob: Vercel project →
+Storage → Create → Blob → connect it to this project. That adds
+`BLOB_READ_WRITE_TOKEN`; no code change is needed. Without it on Vercel,
+emails still work but `/mechanic` reports that storage is not set up.
+
+Each form is one file that is never overwritten (about 2 writes per trip), to
+stay inside Blob's free Hobby allowance. Waiting forms are kept 30 days,
+checked ones 7 days. A form is claimed before the final email is sent, so two
+mechanics cannot both submit it.
+
+### Environment variables for the mechanic step
+
+- `MECHANIC_TO` — mechanic addresses, comma-separated.
+- `MECHANIC_LINK_SECRET` — random string, 16+ characters. Changing it
+  invalidates links already sent.
+- `MECHANIC_PASSWORD` — the shared password for `/mechanic`.
+- `APP_URL` — the site's public URL for the link (e.g.
+  `https://et-zaawar.vercel.app`); without it the request's Host is used.
+- `BLOB_READ_WRITE_TOKEN` — added by connecting the Blob store (above).
+
+### Testing locally
+
+Set `MAIL_OUTBOX_DIR` to write emails to a local folder (.eml + .html)
+instead of sending them. `node scripts/test-mechanic-flow.mjs` runs the whole
+flow against such an outbox. With `npm run dev`, `/outbox` lists those emails
+so the final email can be checked in the browser.
+
 ## Files
 
 - `api/_form-mail.js` — validation, email template, delivery
-- `api/send.js` — Vercel serverless entry point
+- `api/send.js` — Vercel serverless entry point for the form
+- `api/mechanic.js` — Vercel entry point for the mechanic's page
+- `api/_link-token.js` — signs and verifies the mechanic's link
+- `api/_store.js` — the /mechanic list storage (Vercel Blob or a local file)
+- `src/MechanicInbox.jsx` — the /mechanic list page
+- `src/MechanicForm.jsx` — the mechanic's inspection page
 - `vite.config.js` — serves the same handler locally during `npm run dev`
 
 ## Google Drive PDF archive (optional)

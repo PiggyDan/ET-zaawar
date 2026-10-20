@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 
-function Page({ document, number }) {
+function Page({ document, number, label }) {
   const canvas = useRef(null);
   const [error, setError] = useState(false);
 
@@ -18,14 +18,18 @@ function Page({ document, number }) {
     return () => { disposed = true; task?.cancel(); };
   }, [document, number]);
 
-  return error ? <p role="alert">{number}-р хуудсыг харуулахад алдаа гарлаа.</p> : (
-    <canvas ref={canvas} role="img" aria-label={`Журмын ${number}-р хуудас`} />
+  return error ? <p role="alert">{label}-р хуудсыг харуулахад алдаа гарлаа.</p> : (
+    <canvas ref={canvas} role="img" aria-label={`Журмын ${label}-р хуудас`} />
   );
 }
 
-export default function SafetyReader({ onClose }) {
+/**
+ * Shows PDF pages in a modal. `sources` lists the files under
+ * public/documents in reading order; `from` and `to` (1-based, inclusive) limit which pages of a file are shown.
+ */
+export default function SafetyReader({ title, sources, onClose }) {
   const dialog = useRef(null);
-  const [document, setDocument] = useState(null);
+  const [pages, setPages] = useState(null);
   const [error, setError] = useState(false);
 
   useEffect(() => {
@@ -33,18 +37,26 @@ export default function SafetyReader({ onClose }) {
     const previousOverflow = window.document.body.style.overflow;
     window.document.body.style.overflow = "hidden";
     let disposed = false;
-    let loading;
+    const loading = [];
     async function load() {
       try {
         const pdfjs = await import("pdfjs-dist");
         const { default: worker } = await import("pdfjs-dist/build/pdf.worker.min.mjs?url");
         if (disposed) return;
         pdfjs.GlobalWorkerOptions.workerSrc = worker;
-        loading = pdfjs.getDocument({
-          url: `${import.meta.env.BASE_URL}documents/long-distance-travel-policy.pdf`,
-        });
-        const pdf = await loading.promise;
-        if (!disposed) setDocument(pdf);
+        const documents = await Promise.all(sources.map(({ file }) => {
+          const task = pdfjs.getDocument({
+            url: `${import.meta.env.BASE_URL}documents/${file}`,
+          });
+          loading.push(task);
+          return task.promise;
+        }));
+        if (!disposed) {
+          setPages(documents.flatMap((pdf, index) =>
+            Array.from({ length: pdf.numPages }, (_, page) => ({ pdf, number: page + 1 }))
+              .slice((sources[index].from || 1) - 1, sources[index].to)
+          ));
+        }
       } catch (error) {
         console.error("Safety PDF could not be loaded", error);
         if (!disposed) setError(true);
@@ -53,21 +65,21 @@ export default function SafetyReader({ onClose }) {
     load();
     return () => {
       disposed = true;
-      loading?.destroy();
+      loading.forEach((task) => task.destroy());
       window.document.body.style.overflow = previousOverflow;
     };
-  }, []);
+  }, [sources]);
 
   return (
     <dialog ref={dialog} className="safetyReader" aria-labelledby="readerTitle" onCancel={onClose}>
       <div className="safetyReaderHeader">
-        <strong id="readerTitle">Холын аяллын журам</strong>
+        <strong id="readerTitle">{title}</strong>
         <button type="button" autoFocus onClick={onClose}>Хаах / Үргэлжлүүлэх</button>
       </div>
       <div className="safetyReaderPages" tabIndex={0}>
-        {error ? <p role="alert">Баримтыг ачаалж чадсангүй. Хаагаад дахин нээнэ үү.</p> : document ? (
-          Array.from({ length: document.numPages }, (_, index) => (
-            <Page key={index} document={document} number={index + 1} />
+        {error ? <p role="alert">Баримтыг ачаалж чадсангүй. Хаагаад дахин нээнэ үү.</p> : pages ? (
+          pages.map(({ pdf, number }, index) => (
+            <Page key={index} document={pdf} number={number} label={index + 1} />
           ))
         ) : <p role="status">Ачаалж байна...</p>}
       </div>

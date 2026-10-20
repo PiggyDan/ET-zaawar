@@ -14,3 +14,6 @@ env.*.local
 service-account*.json
 sample-output.pdf
 .env*
+
+# Local /mechanic submissions store
+.data/
