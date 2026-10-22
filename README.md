@@ -53,14 +53,22 @@ The workflow is chosen from the trip type:
 3. One consolidated email goes to the final recipients (`MAIL_TO`).
 
 **Workflow B — every other transport, and every Тэсэлгээний аялал**
-1. A mechanic inspects the vehicle on `/mechanic` → "Шинэ үзлэг хийх"
-   (the official Авто машин үзлэгийн хуудас; the Тэсэлгээ sheet for
-   blasting trips). A passed inspection gets a 6-digit code, valid 24 hours
-   and usable once; a failed one gets no code.
-2. Travelers enter that code on their form; the inspected vehicle and
-   driver fill in and cannot be changed.
-3. Uyanga approves on `/approve`.
-4. One consolidated email (trip, travelers, inspection, approvals).
+
+The mechanic and the travelers fill in their forms in either order:
+
+- **Mechanic first:** the mechanic inspects the vehicle on `/mechanic` →
+  "Шинэ үзлэг хийх" (the official Авто машин үзлэгийн хуудас; the
+  Тэсэлгээ sheet for blasting trips). A passed inspection gets a 6-digit
+  code, valid 24 hours and usable once; a failed one gets no code. The
+  travelers enter the code on their form; the inspected vehicle and driver
+  fill in and cannot be changed.
+- **Travelers first:** the travelers submit without a code, typing the
+  vehicle and driver. The trip waits on `/mechanic` under "Үзлэг хүлээж
+  буй"; a mechanic opens it and fills in the sheet. A failed inspection
+  stops the trip.
+
+Only when both forms are in does Uyanga see it to approve on `/approve`;
+then one consolidated email (trip, travelers, inspection, approvals).
 
 Rules the server enforces: no stage can be skipped; each role has its own
 password; an approver decides once; any rejection (with a reason) stops the

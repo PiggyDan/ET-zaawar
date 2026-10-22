@@ -36,6 +36,11 @@ export function mechanicToken() {
   return match ? match[1] : "";
 }
 
+/** A request the travelers sent first (/mechanic#request=<id>), if any. */
+export function mechanicRequestId() {
+  return /^#request=([0-9a-f-]{36})$/.exec(window.location.hash)?.[1] || "";
+}
+
 /** Whether the URL asks for a new inspection (/mechanic#new). */
 export const isNewInspection = () => window.location.hash === "#new";
 
@@ -479,20 +484,26 @@ export function NewInspection() {
 }
 
 /**
- * A form saved before the approval workflow (travelers first), opened from
- * the /mechanic list. Once inspected, it goes on to the approvers.
+ * A trip the travelers sent first, opened from the /mechanic list: either
+ * a request of the current workflow (#request=<id>) or a form saved before
+ * it (#mechanic=<token>). Once inspected, it goes on to the approver.
  */
 export default function MechanicForm() {
   const [token] = useState(mechanicToken);
+  const [requestId] = useState(mechanicRequestId);
+  const password = sessionValue(MECHANIC_PASSWORD_KEY);
   const [submission, setSubmission] = useState(null);
   const [loadError, setLoadError] = useState("");
   const [sending, setSending] = useState(false);
-  const [done, setDone] = useState(false);
+  const [done, setDone] = useState(null);
   const state = useInspection();
 
   useEffect(() => {
-    postJson("/api/mechanic", { token }).then(setSubmission, (error) => setLoadError(error.message));
-  }, [token]);
+    const load = requestId
+      ? postJson("/api/workflow", { action: "mechanicRequest", password, id: requestId })
+      : postJson("/api/mechanic", { token });
+    load.then(setSubmission, (error) => setLoadError(error.message));
+  }, [token, requestId]);
 
   const submit = async (e) => {
     e.preventDefault();
@@ -506,8 +517,11 @@ export default function MechanicForm() {
 
     setSending(true);
     try {
-      await postJson("/api/mechanic", { token, inspection: state.inspection, signature: await state.signatureThumb() });
-      setDone(true);
+      const signature = await state.signatureThumb();
+      await (requestId
+        ? postJson("/api/workflow", { action: "inspectRequest", password, id: requestId, inspection: state.inspection, signature })
+        : postJson("/api/mechanic", { token, inspection: state.inspection, signature }));
+      setDone(state.inspection.result);
       window.scrollTo({ top: 0 });
     } catch (error) {
       alert(error.message || "Илгээхэд асуудал гарлаа. Та дахин оролдоно уу.");
@@ -516,6 +530,20 @@ export default function MechanicForm() {
     }
   };
 
+  if (requestId && !password) {
+    return (
+      <Notice icon={<KeyRound size={44} strokeWidth={2.2} />} title="Нэвтэрнэ үү">
+        <p>Үзлэг хийхийн өмнө механикийн жагсаалт руу нэвтэрнэ үү.</p>
+      </Notice>
+    );
+  }
+  if (done && requestId && done !== MECHANIC_PASS) {
+    return (
+      <Notice icon={<AlertTriangle size={44} strokeWidth={2.2} />} tone="error" title="Үзлэгт тэнцээгүй">
+        <p>Үзлэг хадгалагдлаа. Энэ машин тэнцээгүй тул аялал батлагчид очихгүй.</p>
+      </Notice>
+    );
+  }
   if (done) {
     return (
       <Notice icon={<CheckCircle2 size={44} strokeWidth={2.2} />} title="Үзлэг илгээгдлээ">

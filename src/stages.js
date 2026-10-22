@@ -1,6 +1,7 @@
 /** Display names and tones for the workflow stages (api/_workflow.js STAGES). */
 export const STAGE_LABELS = {
   waiting_travel: ["Аялагч хүлээж буй", "wait"],
+  waiting_mechanic: ["Механикийн үзлэг хүлээж буй", "wait"],
   code_expired: ["Кодын хугацаа дууссан", "muted"],
   inspection_failed: ["Үзлэгт тэнцээгүй", "bad"],
   waiting_approval: ["Батлах хүлээж буй", "wait"],

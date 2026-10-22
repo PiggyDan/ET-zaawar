@@ -226,15 +226,64 @@ await test("If a second approver is configured, both must approve", async () => 
 /* ---------- Workflow B: mechanic first ---------- */
 
 let codeB;
-await test("B: travelers cannot submit a non-АТҮТ trip without a mechanic code", async () => {
-  const r = await submit(travel("Байгууллагын унаагаар"));
-  assert.equal(r.status, 400);
-  assert.match(r.body.error, /код/);
-  for (const transport of ["Замын унаа", "Хувийн унаа", "Гэрээт компаний унаа", "Бусад"]) {
-    assert.equal((await submit(travel(transport))).status, 400, transport);
+const inspectRequest = (id, extra = {}) =>
+  wf({ action: "inspectRequest", password: "mechanic-pw", id, inspection: inspectionFor("Энгийн аялал", {}, ["1.5"]), signature: PNG, ...extra });
+
+await test("B, travelers first: without a code the request waits for the mechanic, not the approver", async () => {
+  for (const transport of ["Байгууллагын унаагаар", "Замын унаа", "Хувийн унаа", "Гэрээт компаний унаа", "Бусад"]) {
+    const r = await submit(travel(transport, { vehicle: "Toyota Prado, 5555 УНА", driver: "Батаа", driverPhone: "88110000" }));
+    assert.equal(r.status, 200, `${transport}: ${JSON.stringify(r.body)}`);
+    assert.equal(r.body.stage, "waiting_mechanic");
+    assert.equal((await decide("uyanga-pw", r.body.id)).status, 409, "approver cannot review before the mechanic");
   }
-  assert.equal((await submit(blast())).status, 400, "blasting too");
+  const blastFirst = await submit(blast({ vehicle: "Howo, 7777 ӨМА", driver: "Дорж", driverPhone: "88112233" }));
+  assert.equal(blastFirst.body.stage, "waiting_mechanic", "blasting too");
+  assert.equal(newMail().length, 0, "no alert until both forms are in");
+
+  assert.equal((await submit(travel("Байгууллагын унаагаар", { vehicle: "" }))).status, 400, "the vehicle is required without a code");
+  assert.equal((await submit(travel("Байгууллагын унаагаар", { inspectionCode: "123" }))).status, 400, "a bad code is still refused");
+});
+
+await test("B, travelers first: the mechanic inspects it once, then the approver reviews and the email goes out", async () => {
+  const { body } = await submit(travel("Байгууллагын унаагаар", { vehicle: "Toyota Prado, 5555 УНА", driver: "Батаа", driverPhone: "88110000" }));
+
+  const listed = (await wf({ action: "mechanicList", password: "mechanic-pw" })).body.inspections.find((item) => item.id === body.id);
+  assert.equal(listed.stage, "waiting_mechanic", "listed for the mechanic");
+  const view = await wf({ action: "mechanicRequest", password: "mechanic-pw", id: body.id });
+  assert.equal(view.status, 200, JSON.stringify(view.body));
+  assert.ok(view.body.rows.some(([label, value]) => label === "Автомашин" && value === "Toyota Prado, 5555 УНА"));
+  assert.equal(view.body.done, null);
+  assert.equal((await wf({ action: "mechanicRequest", password: "uyanga-pw", id: body.id })).status, 401, "mechanic password needed");
+
+  assert.equal((await inspectRequest(body.id, { inspection: inspectionFor("Энгийн аялал", { odometer: "" }) })).status, 400);
+  const inspected = await inspectRequest(body.id);
+  assert.equal(inspected.status, 200, JSON.stringify(inspected.body));
+  assert.equal(inspected.body.stage, "waiting_approval");
+  assert.equal(alerts(newMail()).length, 1, "approver alerted once both forms are in");
+  assert.equal((await inspectRequest(body.id)).status, 409, "inspected only once");
+  assert.ok((await wf({ action: "mechanicRequest", password: "mechanic-pw", id: body.id })).body.done);
+
+  await decide("uyanga-pw", body.id);
+  const [final, ...more] = finals(newMail());
+  assert.equal(more.length, 0);
+  assert.match(final.html, /Авто машин үзлэгийн хуудас/);
+  assert.match(final.html, /Toyota Prado, 5555 УНА/);
+  assert.match(final.html, /Хэвийн бус — Элэгдсэн/);
+});
+
+await test("B, travelers first: a failed inspection stops the request", async () => {
+  const { body } = await submit(travel("Замын унаа", { vehicle: "Toyota Prado, 5555 УНА", driver: "Батаа", driverPhone: "88110000" }));
+  const r = await inspectRequest(body.id, { inspection: inspectionFor("Энгийн аялал", { result: "Тэнцээгүй", note: "Тоормос муу" }) });
+  assert.equal(r.body.stage, "inspection_failed");
+  assert.equal((await decide("uyanga-pw", body.id)).status, 409);
   assert.equal(newMail().length, 0);
+});
+
+await test("АТҮТ never waits for a mechanic, and cannot be inspected", async () => {
+  const { body } = await submit(atut());
+  assert.equal(body.stage, "waiting_approval");
+  assert.equal((await inspectRequest(body.id)).status, 404);
+  newMail();
 });
 
 await test("B: a failed inspection gets no code", async () => {

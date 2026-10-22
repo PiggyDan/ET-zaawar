@@ -4,10 +4,14 @@
  * Workflow A — АТҮТ / Нийтийн тээвэр (no mechanic):
  *   travelers submit → the approver approves → one consolidated email.
  *
- * Workflow B — every other trip, and every Тэсэлгээний аялал:
- *   mechanic inspects the vehicle (a passed inspection gets a 6-digit code)
- *   → travelers submit with that code → the approver approves → one
- *   consolidated email.
+ * Workflow B — every other trip, and every Тэсэлгээний аялал. The mechanic
+ * and the travelers fill in their forms in either order:
+ *   - mechanic first: a passed inspection gets a 6-digit code, and the
+ *     travelers submit with it;
+ *   - travelers first: they submit without a code, typing the vehicle, and
+ *     the request waits on /mechanic until a mechanic inspects it.
+ * Only when both forms are in does the approver review it → one
+ * consolidated email.
  *
  * The approver is Uyanga (APPROVER_1_*). Every configured approver must
  * approve, so adding APPROVER_2_* later makes it two, without code changes.
@@ -62,6 +66,7 @@ export const CODE_TTL_MS = 24 * 60 * 60 * 1000;
 
 export const STAGES = {
   waitingTravel: "waiting_travel",
+  waitingMechanic: "waiting_mechanic",
   codeExpired: "code_expired",
   failed: "inspection_failed",
   waitingApproval: "waiting_approval",
@@ -176,6 +181,7 @@ export function describe(id, { inspection, travel, sent, decisions }, now = Date
 
   const form = travel?.form;
   const tripType = inspection?.tripType || form?.tripType;
+  const needsInspection = Boolean(inspection) || needsMechanic(form);
   const keys = approvers().map((approver) => approver.key);
   const approvals = decisions.filter((decision) => decision.decision === APPROVE);
   const rejection = decisions.find((decision) => decision.decision === REJECT);
@@ -184,6 +190,7 @@ export function describe(id, { inspection, travel, sent, decisions }, now = Date
   let stage;
   if (inspection && inspection.inspection.result !== MECHANIC_PASS) stage = STAGES.failed;
   else if (!travel) stage = now > inspection.expiresAt ? STAGES.codeExpired : STAGES.waitingTravel;
+  else if (!inspection && needsInspection) stage = STAGES.waitingMechanic;
   else if (rejection) stage = STAGES.rejected;
   else if (sent) stage = STAGES.sent;
   else if (allApproved) stage = STAGES.approved;
@@ -212,7 +219,7 @@ export function describe(id, { inspection, travel, sent, decisions }, now = Date
 
   return {
     id,
-    workflow: inspection ? "B" : "A",
+    workflow: needsInspection ? "B" : "A",
     tripType,
     stage,
     createdAt: inspection?.createdAt || travel?.submittedAt,
@@ -417,9 +424,10 @@ async function checkCode(store, payload) {
 /* ---------- Travelers ---------- */
 
 /**
- * The travelers' form, for both workflows (POST /api/send). Workflow B
- * needs a valid mechanic code; the inspected vehicle and driver replace
- * whatever the form had, so they always match the inspection.
+ * The travelers' form, for both workflows (POST /api/send). In workflow B,
+ * with a mechanic code the inspected vehicle and driver replace whatever
+ * the form had, so they always match the inspection; without one, the
+ * request waits for a mechanic to inspect the vehicle the form names.
  */
 export async function submitTravel(payload, { origin } = {}) {
   let form = payload?.form;
@@ -432,8 +440,9 @@ export async function submitTravel(payload, { origin } = {}) {
   if (setupError) return setupError;
 
   let id = randomUUID();
-  if (needsMechanic(form)) {
-    const { inspection, error } = await inspectionForCode(store, String(form.inspectionCode ?? "").trim());
+  const code = String(form.inspectionCode ?? "").trim();
+  if (needsMechanic(form) && code) {
+    const { inspection, error } = await inspectionForCode(store, code);
     if (error) return error;
     if (inspection.tripType !== form.tripType) {
       return fail(409, `Энэ механикийн код "${inspection.tripType}"-д зориулагдсан.`);
@@ -459,10 +468,66 @@ export async function submitTravel(payload, { origin } = {}) {
   });
   if (!saved) return fail(409, "Энэ механикийн кодыг аль хэдийн ашигласан байна.");
 
+  // The approver hears about it once both forms are in.
   const request = await loadRequest(store, id);
-  await alertApprovers(request, origin);
+  if (request.stage === STAGES.waitingApproval) await alertApprovers(request, origin);
 
-  return ok({ id, stage: STAGES.waitingApproval });
+  return ok({ id, stage: request.stage });
+}
+
+/** A request the travelers sent first, as the mechanic sees it. */
+async function mechanicRequest(store, id) {
+  const request = await loadRequest(store, id);
+  const travel = request?.raw.travel;
+  if (!travel || request.workflow !== "B") return fail(404, "Хүсэлт олдсонгүй.");
+
+  const { inspection } = request.raw;
+  return ok({
+    title: titleOf(travel.form),
+    rows: summaryRows(travel.form),
+    sheet: inspectionSheetFor(travel.form),
+    hasCount: inspectionHasCount(travel.form),
+    employees: travel.employees,
+    signature: travel.signature,
+    done: inspection ? { mechanic: inspection.inspection.mechanic, at: inspection.createdAt, result: inspection.inspection.result } : null
+  });
+}
+
+/**
+ * The mechanic inspects a request the travelers sent first. Write-once, so
+ * it can be inspected only once; then the approver is alerted.
+ */
+async function inspectRequest(store, payload, origin) {
+  const request = await loadRequest(store, payload.id);
+  if (!request?.raw.travel || request.workflow !== "B") return fail(404, "Хүсэлт олдсонгүй.");
+  if (request.stage !== STAGES.waitingMechanic) return fail(409, "Энэ хүсэлтийг аль хэдийн шалгасан байна.");
+
+  const { form } = request.raw.travel;
+  const inspection = cleanInspection(form, payload.inspection);
+  const missing = validateInspection(form, inspection);
+  if (missing.length > 0) return fail(400, `Дутуу байна: ${missing[0]}`);
+
+  const mechanicSignature = parseSignature(payload.signature, { maxBytes: MAX_THUMB_BYTES });
+  if (mechanicSignature.error) return fail(400, mechanicSignature.error);
+
+  const createdAt = Date.now();
+  const saved = await store.putOnce(paths.inspection(request.id), {
+    id: request.id,
+    createdAt,
+    expiresAt: createdAt,
+    tripType: form.tripType,
+    vehicle: form.vehicle,
+    driver: form.driver,
+    driverPhone: form.driverPhone,
+    code: null,
+    inspection,
+    mechanicSignature: payload.signature
+  });
+  if (!saved) return fail(409, "Энэ хүсэлтийг аль хэдийн шалгасан байна.");
+
+  const updated = await loadRequest(store, request.id);
+  if (updated.stage === STAGES.waitingApproval) await alertApprovers(updated, origin);
+  return ok({ stage: updated.stage, result: inspection.result });
 }
 
 /**
@@ -560,11 +625,17 @@ export async function handleWorkflow(payload, { origin } = {}) {
 
   if (action === "code") return checkCode(store, payload);
 
-  if (action === "inspect" || action === "mechanicList") {
+  if (["inspect", "mechanicList", "mechanicRequest", "inspectRequest"].includes(action)) {
     if (!process.env.MECHANIC_PASSWORD) return fail(500, "MECHANIC_PASSWORD тохируулаагүй байна.");
     if (!passwordMatches(payload.password)) return fail(401, "Нууц үг буруу байна.");
 
     if (action === "inspect") return inspect(store, payload);
+    if (action === "mechanicRequest") return mechanicRequest(store, payload.id);
+    if (action === "inspectRequest") {
+      const setupError = approversError();
+      if (setupError) return setupError;
+      return inspectRequest(store, payload, origin);
+    }
 
     const requests = await loadRequests(store);
     const legacy = await listForMechanic(payload);

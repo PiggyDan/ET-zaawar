@@ -6,9 +6,10 @@ import { stageLabel, stageTone } from "./stages";
 import { BLAST_TRIP } from "../api/_trips.js";
 
 /**
- * /mechanic: behind the shared mechanic password. Starts new inspections
- * (workflow B, step 1), lists them with their codes and stages, and lists
- * forms saved before the approval workflow that still wait for a mechanic.
+ * /mechanic: behind the shared mechanic password. Lists trips the
+ * travelers sent first, which wait for an inspection; starts new
+ * inspections before any trip (they get a code); and shows the rest with
+ * their stages.
  */
 export default function MechanicInbox() {
   const [password, setPassword] = useState(() => sessionValue(MECHANIC_PASSWORD_KEY));
@@ -16,7 +17,7 @@ export default function MechanicInbox() {
   const [data, setData] = useState(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
-  const [tab, setTab] = useState("open");
+  const [tab, setTab] = useState("inspect");
 
   const load = async (secret = password) => {
     setLoading(true);
@@ -78,9 +79,10 @@ export default function MechanicInbox() {
     );
   }
 
+  const toInspect = data.inspections.filter((item) => item.stage === "waiting_mechanic");
   const open = data.inspections.filter((item) => item.stage === "waiting_travel");
-  const others = data.inspections.filter((item) => item.stage !== "waiting_travel");
-  const shown = tab === "open" ? open : others;
+  const others = data.inspections.filter((item) => !["waiting_travel", "waiting_mechanic"].includes(item.stage));
+  const shown = tab === "inspect" ? toInspect : tab === "open" ? open : others;
 
   return (
     <main className="page">
@@ -89,7 +91,7 @@ export default function MechanicInbox() {
         <header className="hero hero--mechanic">
           <span className="heroChip">Механик</span>
           <h1>Механикийн үзлэг</h1>
-          <p>Аялалд гарах машиныг эхлээд шалгаж, тэнцвэл гарах кодыг жолоочид өгнө.</p>
+          <p>Аялагчид илгээсэн машиныг шалгана, эсвэл шинэ үзлэг хийж гарах кодыг жолоочид өгнө.</p>
         </header>
 
         <a className="submitBtn inline newInspection" href="/mechanic#new">
@@ -98,8 +100,11 @@ export default function MechanicInbox() {
 
         <div className="inboxBar">
           <div className="choiceRow" role="tablist">
+            <button type="button" role="tab" aria-selected={tab === "inspect"} className={tab === "inspect" ? "active" : ""} onClick={() => setTab("inspect")}>
+              Үзлэг хүлээж буй ({toInspect.length + data.legacy.length})
+            </button>
             <button type="button" role="tab" aria-selected={tab === "open"} className={tab === "open" ? "active" : ""} onClick={() => setTab("open")}>
-              Код хүлээж буй ({open.length})
+              Код ({open.length})
             </button>
             <button type="button" role="tab" aria-selected={tab === "others"} className={tab === "others" ? "active" : ""} onClick={() => setTab("others")}>
               Бусад ({others.length})
@@ -115,33 +120,37 @@ export default function MechanicInbox() {
 
         {error && <p className="formError" role="alert">{error}</p>}
 
-        {shown.length === 0 ? (
+        {shown.length === 0 && !(tab === "inspect" && data.legacy.length > 0) ? (
           <div className="emptyInbox">
             <Wrench size={28} aria-hidden="true" />
-            <p>{tab === "open" ? "Аялагч хүлээж буй үзлэг алга." : "Өөр үзлэг алга."}</p>
+            <p>{tab === "inspect" ? "Үзлэг хүлээж буй аялал алга." : tab === "open" ? "Аялагч хүлээж буй үзлэг алга." : "Өөр үзлэг алга."}</p>
           </div>
         ) : (
           <ul className="inboxList">
-            {shown.map((item) => (
+            {shown.map((item) => {
+              const Row = item.stage === "waiting_mechanic" ? "a" : "div";
+              return (
               <li key={item.id}>
-                <div className="inboxItem">
+                <Row className="inboxItem" {...(Row === "a" ? { href: `/mechanic#request=${item.id}` } : {})}>
                   <span className={`inboxIcon${item.tripType === BLAST_TRIP ? " blast" : ""}`}>
                     {item.tripType === BLAST_TRIP ? <Bomb size={18} /> : <Car size={18} />}
                   </span>
                   <span className="inboxText">
                     <strong>{item.summary.vehicle}</strong>
-                    <span>{item.summary.driver} · {item.mechanic} · {formatTime(item.createdAt)}</span>
+                    <span>{[item.summary.driver, item.mechanic, item.summary.date].filter(Boolean).join(" · ")} · {formatTime(item.createdAt)}</span>
                     {item.summary.people.length > 0 && <small>{item.summary.people.join(", ")}</small>}
                     <small className={`stage stage--${stageTone(item.stage)}`}>{stageLabel(item.stage)}</small>
                   </span>
                   {item.code && item.stage === "waiting_travel" && <span className="codeBadge">{item.code}</span>}
-                </div>
+                  {Row === "a" && <ChevronRight size={18} aria-hidden="true" />}
+                </Row>
               </li>
-            ))}
+              );
+            })}
           </ul>
         )}
 
-        {data.legacy.length > 0 && (
+        {tab === "inspect" && data.legacy.length > 0 && (
           <>
             <h2 className="listHeading">Өмнөх маягтууд (механик хүлээж буй)</h2>
             <ul className="inboxList">
