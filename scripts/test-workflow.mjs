@@ -47,7 +47,11 @@ const { BLAST_CHECKLIST, inspectionSheetFor } = await import("../api/_trips.js")
 // A 1x1 white PNG stands in for every signature.
 const PNG = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/x8AAwMCAO+ip1sAAAAASUVORK5CYII=";
 const ORIGIN = "https://et-zaawar.example";
-const employees = [{ name: "Бат-Эрдэнэ", position: "Инженер", phone: "99112233" }];
+// The main employee fills in everything; other passengers only name and phone.
+const employees = [
+  { name: "Бат-Эрдэнэ", position: "Инженер", phone: "99112233" },
+  { name: "Сараа", position: "", phone: "99445566" }
+];
 
 const travel = (transport, extra = {}) => ({
   company: "ЭРХЭТ ТҮНШ ХХК",
@@ -119,7 +123,9 @@ function inspectionFor(tripType, extra = {}, bad = []) {
 }
 
 const wf = (payload) => handleWorkflow(payload, { origin: ORIGIN });
-const submit = (form, extra = {}) => submitTravel({ form, employees, signature: PNG, signatureThumb: PNG, ...extra }, { origin: ORIGIN });
+const PHOTOS = [PNG, PNG];
+const submit = (form, extra = {}) =>
+  submitTravel({ form, employees, signature: PNG, signatureThumb: PNG, photos: PHOTOS, ...extra }, { origin: ORIGIN });
 const inspect = (extra = {}) =>
   wf({
     action: "inspect",
@@ -221,6 +227,49 @@ await test("If a second approver is configured, both must approve", async () => 
   } finally {
     Object.assign(process.env, { APPROVER_2_NAME: "", APPROVER_2_EMAIL: "", APPROVER_2_PASSWORD: "" });
   }
+});
+
+await test("Photos: at least 2, at most 8, images only; shown to the approver and in the final email", async () => {
+  assert.equal((await submit(atut(), { photos: [PNG] })).status, 400, "one photo is not enough");
+  assert.equal((await submit(atut(), { photos: undefined })).status, 400, "photos are required");
+  assert.equal((await submit(atut(), { photos: Array(9).fill(PNG) })).status, 400, "at most 8");
+  assert.equal((await submit(atut(), { photos: [PNG, "data:text/plain;base64,aGk="] })).status, 400, "images only");
+  assert.equal(newMail().length, 0, "nothing is sent for a refused form");
+
+  const { body } = await submit(atut(), { photos: [PNG, PNG, PNG] });
+  newMail();
+  const detail = (await wf({ action: "request", password: "uyanga-pw", id: body.id })).body.request;
+  assert.equal(detail.photos.length, 3, "approver sees the photos");
+  assert.equal(detail.signature, PNG, "approver sees the signature");
+
+  await decide("uyanga-pw", body.id);
+  const [final] = finals(newMail());
+  assert.ok(final.html.includes("Зураг (3)"));
+  assert.match(final.html, /cid:photo-3/);
+  assert.equal((final.eml.match(/Content-ID:/g) || []).length, 4, "signature and 3 photos attached");
+});
+
+await test("Passengers: the main employee fills in everything, others only name and phone", async () => {
+  const only = (list) => submitTravel({ form: atut(), employees: list, signature: PNG, signatureThumb: PNG, photos: PHOTOS }, { origin: ORIGIN });
+  assert.equal((await only([{ name: "Бат", position: "", phone: "99112233" }])).status, 400, "main employee needs a position");
+  assert.equal((await only([employees[0], { name: "Сараа", position: "", phone: "" }])).status, 400, "others need a phone");
+  assert.equal((await only([employees[0], { name: "", position: "", phone: "99445566" }])).status, 400, "others need a name");
+  const ok = await only([employees[0], { name: "Сараа", phone: "99445566" }, { name: "Дулмаа", phone: "88001122" }]);
+  assert.equal(ok.status, 200, JSON.stringify(ok.body));
+  newMail();
+  await decide("uyanga-pw", ok.body.id);
+  const [final] = finals(newMail());
+  assert.match(final.html, /Үндсэн ажилтан/);
+  assert.ok(final.html.includes("Бусад зорчигчид (2)"));
+  assert.ok(final.html.includes("3. Дулмаа"));
+});
+
+await test("Normal trips no longer ask who approved (only who instructed); blasting still does", async () => {
+  const r = await submit({ ...atut(), approver: "", approverPosition: "" });
+  assert.equal(r.status, 200, JSON.stringify(r.body));
+  assert.equal((await submit({ ...atut(), instructor: "" })).status, 400, "instructor still required");
+  assert.equal((await submit(blast({ approver: "", vehicle: "Howo, 7777 ӨМА", driver: "Дорж", driverPhone: "88112233" }))).status, 400, "blasting keeps its approver");
+  newMail();
 });
 
 /* ---------- Workflow B: mechanic first ---------- */
@@ -325,7 +374,7 @@ await test("B: travelers submit with the code; vehicle and driver come from the 
   assert.match(final.html, /Хэвийн бус — Элэгдсэн/);
   assert.match(final.html, /Ганбат/);
   assert.match(final.html, /Батлагдсан/);
-  assert.equal((final.eml.match(/Content-ID:/g) || []).length, 2, "traveler and mechanic signatures");
+  assert.equal((final.eml.match(/Content-ID:/g) || []).length, 4, "traveler and mechanic signatures, and 2 photos");
 });
 
 await test("B: a blasting code only fits a blasting trip, and uses the blasting sheet", async () => {

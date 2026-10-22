@@ -86,7 +86,8 @@ export function travelRows(form) {
           ["GPS хэвийн эсэх", form.gps]
         ]
       : []),
-    ["Зөвшөөрсөн", [form.approver, form.approverPosition].filter(Boolean).join(", ")],
+    // Only on forms from before the field was dropped (approval is now on /approve).
+    ...(form.approver ? [["Зөвшөөрсөн", [form.approver, form.approverPosition].filter(Boolean).join(", ")]] : []),
     ["Зааварчилгаа өгсөн", [form.instructor, form.instructorPosition].filter(Boolean).join(", ")]
   ];
 }
@@ -101,9 +102,7 @@ export function validateTravel(form) {
   if (!digits(form.leaderPhone)) missing.push("Аяллын ахлагчийн утас");
   if (!text(form.purpose)) missing.push("Аяллын зорилго");
   if (!form.travelDate) missing.push("Аялал эхлэх огноо");
-  if (!form.departTime) missing.push("Аялал эхлэх цаг");
   if (!form.returnDate) missing.push("Аялал дуусах огноо");
-  if (!form.returnTime) missing.push("Аялал дуусах цаг");
   if (form.travelDate && form.returnDate && form.returnDate < form.travelDate) {
     missing.push("Аялал дуусах огноо эхлэх огнооноос өмнө байна");
   }
@@ -120,8 +119,6 @@ export function validateTravel(form) {
     if (!YES_NO.includes(form.gps)) missing.push("GPS хэвийн эсэх");
   }
 
-  if (!text(form.approver)) missing.push("Зөвшөөрсөн албан тушаалтны нэр");
-  if (!text(form.approverPosition)) missing.push("Зөвшөөрсөн албан тушаалтны албан тушаал");
   if (!text(form.instructor)) missing.push("Зааварчилгаа өгсөн албан тушаалтны нэр");
   if (!text(form.instructorPosition)) missing.push("Зааварчилгаа өгсөн албан тушаалтны албан тушаал");
 

@@ -51,7 +51,16 @@ const MAX_SIGNATURE_BYTES = 3 * 1024 * 1024;
 // The copy that rides inside the mechanic's link; keeps the link short.
 export const MAX_THUMB_BYTES = 24 * 1024;
 
+/** Photos the travelers attach: at least MIN, at most MAX. */
+export const MIN_PHOTOS = 2;
+export const MAX_PHOTOS = 8;
+// Photos are shrunk in the browser; these caps keep a request well under
+// Vercel's 4.5MB body limit.
+const MAX_PHOTO_BYTES = 900 * 1024;
+const MAX_PHOTOS_TOTAL_BYTES = 3 * 1024 * 1024;
+
 const SIGNATURE_CID = "signature";
+const photoCid = (index) => `photo-${index + 1}`;
 const MECHANIC_SIGNATURE_CID = "mechanic-signature";
 
 export const esc = (value) =>
@@ -155,7 +164,7 @@ async function buildPdfBuffer(form, employees, signature, inspection, mechanicSi
   employees.forEach((employee, idx) => {
     doc.fontSize(12).fillColor("black").text(`Ажилтан ${idx + 1}`, { underline: true });
     addRow("Овог нэр", employee.name);
-    addRow("Албан тушаал", employee.position);
+    if (employee.position) addRow("Албан тушаал", employee.position);
     addRow("Утас", employee.phone);
     doc.moveDown();
   });
@@ -258,6 +267,25 @@ export function parseSignature(signature, { name = "garyn-useg", maxBytes = MAX_
   return { base64, buffer, contentType, filename: `${name}.${extension}` };
 }
 
+/** Parses the travelers' photos (data URLs) into email attachments, or an error. */
+export function parsePhotos(list) {
+  if (!Array.isArray(list) || list.length < MIN_PHOTOS) {
+    return { error: `Хамгийн багадаа ${MIN_PHOTOS} зураг оруулна уу.` };
+  }
+  if (list.length > MAX_PHOTOS) return { error: `Хамгийн ихдээ ${MAX_PHOTOS} зураг оруулна уу.` };
+
+  const photos = [];
+  for (const [index, photo] of list.entries()) {
+    const parsed = parseSignature(photo, { name: `zurag-${index + 1}`, maxBytes: MAX_PHOTO_BYTES });
+    if (parsed.error) return { error: `Зураг ${index + 1}: ${parsed.error.replace("Гарын үсгийн зураг", "Зураг").replace("Гарын үсэг", "Зураг")}` };
+    photos.push(parsed);
+  }
+  if (photos.reduce((sum, photo) => sum + photo.buffer.length, 0) > MAX_PHOTOS_TOTAL_BYTES) {
+    return { error: "Зургууд хэт том байна. Цөөн эсвэл жижиг зураг сонгоно уу." };
+  }
+  return { photos };
+}
+
 export function validate(form, employees) {
   const missing = isBlast(form) ? validateBlast(form) : validateTravel(form);
 
@@ -266,9 +294,10 @@ export function validate(form, employees) {
   if (employees.length === 0) missing.push("Зорчих ажилтан");
 
   employees.forEach((employee, index) => {
-    if (!employee?.name?.trim()) missing.push(`Ажилтан ${index + 1} - Овог нэр`);
-    if (!employee?.position?.trim()) missing.push(`Ажилтан ${index + 1} - Албан тушаал`);
-    if (!employee?.phone?.trim()) missing.push(`Ажилтан ${index + 1} - Утасны дугаар`);
+    const who = index === 0 ? "Үндсэн ажилтан" : `Зорчигч ${index + 1}`;
+    if (!employee?.name?.trim()) missing.push(`${who} - Овог нэр`);
+    if (index === 0 && !employee?.position?.trim()) missing.push(`${who} - Албан тушаал`);
+    if (!/^[0-9]+$/.test(employee?.phone ?? "")) missing.push(`${who} - Утасны дугаар`);
   });
 
   return missing;
@@ -278,7 +307,7 @@ export function validate(form, employees) {
  * The email body; with `inspection`, it includes the mechanic's findings
  * and signature, and with `approvals`, who approved it and when.
  */
-function buildHtml(form, employees, { inspection, approvals } = {}) {
+function buildHtml(form, employees, { inspection, approvals, photoCount = 0 } = {}) {
   const row = (label, value) => `
         <tr>
           <td style="padding:8px 12px; background:#f9fafb; border:1px solid #e5e7eb; width:200px; vertical-align:top;">${esc(label)}</td>
@@ -299,12 +328,24 @@ function buildHtml(form, employees, { inspection, approvals } = {}) {
             </td>
           </tr>`;
 
-  const employeeRows = employees
-    .map(
-      (employee, index) =>
-        `${groupRow(`Ажилтан ${index + 1}`)}${row("Овог нэр", employee.name)}${row("Албан тушаал", employee.position)}${row("Утасны дугаар", employee.phone)}`
-    )
-    .join("");
+  const [main, ...others] = employees;
+  const employeeRows = `${groupRow("Үндсэн ажилтан")}${row("Овог нэр", main.name)}${row("Албан тушаал", main.position)}${row("Утасны дугаар", main.phone)}${
+    others.length > 0
+      ? `${groupRow(`Бусад зорчигчид (${others.length})`)}${others
+          .map((employee, index) => row(`${index + 2}. ${employee.name}`, employee.phone))
+          .join("")}`
+      : ""
+  }`;
+
+  const photoRowsHtml = photoCount > 0
+    ? `${groupRow(`Зураг (${photoCount})`)}
+          <tr>
+            <td colspan="2" style="padding:12px; border:1px solid #e5e7eb;">${Array.from(
+              { length: photoCount },
+              (_, index) => `<img src="cid:${photoCid(index)}" alt="Зураг ${index + 1}" style="width:200px; max-width:100%; margin:4px; border:1px solid #d1d5db; border-radius:6px;" />`
+            ).join("")}</td>
+          </tr>`
+    : "";
 
   const checklistRows = checklistFor(form).length > 0
     ? `${groupRow("Шалгах хуудас")}${checklistFor(form).map((item) => row("Шалгасан", item)).join("")}`
@@ -359,7 +400,7 @@ function buildHtml(form, employees, { inspection, approvals } = {}) {
           <tr>
             <td style="padding:8px 12px; background:#f9fafb; border:1px solid #e5e7eb; vertical-align:top;">Танилцсан эсэх</td>
             <td style="padding:8px 12px; border:1px solid #e5e7eb;">Дээрх шаардлагыг бүрэн уншиж танилцсан, ойлгосон бөгөөд мөрдөхөө зөвшөөрсөн.</td>
-          </tr>${signatureRow("Гарын үсэг", SIGNATURE_CID)}${inspectionRowsHtml}${approvalRowsHtml}
+          </tr>${signatureRow("Гарын үсэг", SIGNATURE_CID)}${photoRowsHtml}${inspectionRowsHtml}${approvalRowsHtml}
         </table>
 
         <p style="margin:20px 0 0; font-size:12px; color:#6b7280;">
@@ -371,14 +412,14 @@ function buildHtml(form, employees, { inspection, approvals } = {}) {
 </html>`;
 }
 
-function buildText(form, employees, { inspection, approvals } = {}) {
+function buildText(form, employees, { inspection, approvals, photoCount = 0 } = {}) {
   const lines = [titleOf(form), ""];
 
   lines.push(...summaryRows(form).map(([label, value]) => `${label}: ${value || "-"}`), "");
 
   employees.forEach((employee, index) => {
     lines.push(
-      `Ажилтан ${index + 1}: ${employee.name} | ${employee.position} | ${employee.phone}`
+      [index === 0 ? "Үндсэн ажилтан" : `Зорчигч ${index + 1}`, employee.name, employee.position, employee.phone].filter(Boolean).join(" | ")
     );
   });
 
@@ -399,7 +440,7 @@ function buildText(form, employees, { inspection, approvals } = {}) {
     lines.push("", "Батлагдсан:", ...approvalLines(approvals).map(([label, value]) => `${label}: ${value}`));
   }
 
-  lines.push("", "Гарын үсэг хавсралтад байна.");
+  lines.push("", photoCount > 0 ? `Гарын үсэг болон ${photoCount} зураг хавсралтад байна.` : "Гарын үсэг хавсралтад байна.");
 
   return lines.join("\n");
 }
@@ -594,13 +635,18 @@ async function archiveToDrive(form, employees, signature, inspection, mechanicSi
  * Emails the finished form (with the inspection and approvals, if any) to
  * the final recipients: the one consolidated email.
  */
-export async function sendFinal(form, employees, signature, inspection, mechanicSignature, approvals) {
+export async function sendFinal(form, employees, signature, inspection, mechanicSignature, approvals, photos = []) {
+  const options = { inspection, approvals, photoCount: photos.length };
   const message = {
     to: recipients(),
-    subject: buildSubject(form, employees, { inspection, approvals }),
-    html: buildHtml(form, employees, { inspection, approvals }),
-    text: buildText(form, employees, { inspection, approvals }),
-    images: [[signature, SIGNATURE_CID], [mechanicSignature, MECHANIC_SIGNATURE_CID]]
+    subject: buildSubject(form, employees, options),
+    html: buildHtml(form, employees, options),
+    text: buildText(form, employees, options),
+    images: [
+      [signature, SIGNATURE_CID],
+      [mechanicSignature, MECHANIC_SIGNATURE_CID],
+      ...photos.map((photo, index) => [photo, photoCid(index)])
+    ]
   };
 
   let id;

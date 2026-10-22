@@ -20,6 +20,8 @@
  *
  *   wf/r/<id>/inspection.json      the mechanic's inspection (B only)
  *   wf/r/<id>/travel.json          the travelers' form
+ *   wf/r/<id>/photos-<n>.json      the travelers' photos (named in travel.json;
+ *                                  kept apart so lists stay small)
  *   wf/r/<id>/decision-<key>.json  one approver's approve / reject
  *   wf/r/<id>/sent.json            claim for the consolidated email
  *   wf/codes/<code>.json           mechanic code → request id
@@ -49,6 +51,7 @@ import {
   esc,
   listForMechanic,
   mailConfigError,
+  parsePhotos,
   parseSignature,
   passwordMatches,
   recordSummary,
@@ -83,8 +86,16 @@ const paths = {
   travel: (id) => `wf/r/${id}/travel.json`,
   decision: (id, key) => `wf/r/${id}/decision-${key}.json`,
   sent: (id) => `wf/r/${id}/sent.json`,
-  code: (code) => `wf/codes/${code}.json`
+  code: (code) => `wf/codes/${code}.json`,
+  photos: (id, name) => `wf/r/${id}/${name}`
 };
+
+/** A request's photos as data URLs ([] for requests from before photos). */
+async function readPhotos(store, request) {
+  const name = request.raw.travel?.photos;
+  if (!name) return [];
+  return (await store.read(paths.photos(request.id, name)).catch(() => null))?.photos || [];
+}
 
 const ok = (body) => ({ status: 200, body: { ok: true, ...body } });
 const fail = (status, error) => ({ status, body: { error } });
@@ -315,6 +326,7 @@ async function finalize(store, request) {
   const approvals = request.decisions
     .filter((decision) => decision.decision === APPROVE)
     .sort((a, b) => a.at - b.at);
+  const parsedPhotos = parsePhotos(await readPhotos(store, request));
 
   const sent = await sendFinal(
     travel.form,
@@ -322,7 +334,8 @@ async function finalize(store, request) {
     signature.error ? null : signature,
     inspection?.inspection,
     mechanicSignature && !mechanicSignature.error ? mechanicSignature : null,
-    approvals
+    approvals,
+    parsedPhotos.photos || []
   );
 
   // 502 means the email did not go out; anything else (such as a Drive
@@ -458,12 +471,20 @@ export async function submitTravel(payload, { origin } = {}) {
   if (signature.error) return fail(400, signature.error);
   const thumb = parseSignature(payload?.signatureThumb, { maxBytes: MAX_THUMB_BYTES });
   if (thumb.error) return fail(400, thumb.error);
+  const photos = parsePhotos(payload?.photos);
+  if (photos.error) return fail(400, photos.error);
+
+  // A fresh name, so a refused or retried submit never clashes with it.
+  const photosName = `photos-${randomUUID()}.json`;
+  await store.putOnce(paths.photos(id, photosName), { photos: payload.photos });
 
   // Write-once: a second form with the same code is refused here.
   const saved = await store.putOnce(paths.travel(id), {
     form,
     employees,
     signature: payload.signatureThumb,
+    photos: photosName,
+    photoCount: payload.photos.length,
     submittedAt: Date.now()
   });
   if (!saved) return fail(409, "Энэ механикийн кодыг аль хэдийн ашигласан байна.");
@@ -659,7 +680,7 @@ export async function handleWorkflow(payload, { origin } = {}) {
   if (action === "request") {
     const request = await loadRequest(store, payload.id);
     if (!request?.raw.travel) return fail(404, "Хүсэлт олдсонгүй.");
-    return ok({ approver: me, request: requestDetail(request) });
+    return ok({ approver: me, request: { ...requestDetail(request), photos: await readPhotos(store, request) } });
   }
 
   if (action === "decide") return decide(store, approver, payload, origin);

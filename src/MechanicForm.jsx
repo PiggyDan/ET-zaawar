@@ -610,7 +610,7 @@ export default function MechanicForm() {
                 {submission.employees.map((employee, index) => (
                   <div key={index}>
                     <dt>Зорчигч {index + 1}</dt>
-                    <dd>{employee.name} · {employee.position} · {employee.phone}</dd>
+                    <dd>{[employee.name, employee.position, employee.phone].filter(Boolean).join(" · ")}</dd>
                   </div>
                 ))}
               </dl>

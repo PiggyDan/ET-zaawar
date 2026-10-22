@@ -18,6 +18,7 @@ import {
   Send,
   ShieldCheck,
   Trash2,
+  Camera,
   UserRound,
   Users
 } from "lucide-react";
@@ -26,7 +27,7 @@ import SafetyReader from "./SafetyReader";
 import MechanicForm, { NewInspection, isNewInspection, mechanicRequestId, mechanicToken } from "./MechanicForm";
 import MechanicInbox from "./MechanicInbox";
 import ApprovalPage from "./ApprovalPage";
-import { AppBar, ChoiceField, Field, Section, readScaledImage, scaleDataUrl } from "./ui";
+import { AppBar, ChoiceField, Field, PhotoPicker, Section, SignaturePad, scaleDataUrl } from "./ui";
 import {
   BLAST_TRIP,
   NORMAL_TRIP,
@@ -44,6 +45,10 @@ const emptyEmployee = () => ({ name: "", position: "", phone: "" });
 
 /** Passenger rows on the Аяллын хуудас; the blasting team stays small. */
 const MAX_PASSENGERS = { [NORMAL_TRIP]: 18, [BLAST_TRIP]: 4 };
+
+/** Photos of the group / vehicle the travelers attach. */
+const MIN_PHOTOS = 2;
+const MAX_PHOTOS = 8;
 
 // Read in "Зааварчилгаа PDF унших". Each annex file's Аяллын хуудас (page 1)
 // is replaced by the web form, and its Авто машин үзлэгийн хуудас (travel
@@ -153,6 +158,7 @@ function App() {
   const [accepted, setAccepted] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [signature, setSignature] = useState("");
+  const [photos, setPhotos] = useState([]);
   const [sending, setSending] = useState(false);
 
   const [form, setForm] = useState(initialForm);
@@ -261,12 +267,15 @@ function App() {
 
     if (!activeChecklist.every((item) => checklist.includes(item))) missing.push("Шалгах хуудас");
 
+    // The main employee fills in everything; others only name and phone.
     employees.forEach((employee, index) => {
-      if (!employee.name.trim()) missing.push(`Ажилтан ${index + 1} - Овог нэр`);
-      if (!employee.position.trim()) missing.push(`Ажилтан ${index + 1} - Албан тушаал`);
-      if (!employee.phone.trim()) missing.push(`Ажилтан ${index + 1} - Утасны дугаар`);
+      const who = index === 0 ? "Үндсэн ажилтан" : `Зорчигч ${index + 1}`;
+      if (!employee.name.trim()) missing.push(`${who} - Овог нэр`);
+      if (index === 0 && !employee.position.trim()) missing.push(`${who} - Албан тушаал`);
+      if (!employee.phone.trim()) missing.push(`${who} - Утасны дугаар`);
     });
 
+    if (photos.length < MIN_PHOTOS) missing.push(`Зураг (хамгийн багадаа ${MIN_PHOTOS})`);
     if (!signature) missing.push("Гарын үсэг");
     if (!accepted) missing.push("Танилцсан нөхцөл");
 
@@ -288,9 +297,10 @@ function App() {
         },
         body: JSON.stringify({
           form: sent,
-          employees,
+          employees: employees.map((employee, index) => (index === 0 ? employee : { ...employee, position: "" })),
           signature,
-          signatureThumb
+          signatureThumb,
+          photos
         })
       });
 
@@ -303,6 +313,7 @@ function App() {
       setSubmitted(data.stage || "waiting_approval");
       setAccepted(false);
       setSignature("");
+      setPhotos([]);
       setEmployees([emptyEmployee()]);
       setChecklist([]);
       setForm(initialForm());
@@ -314,17 +325,6 @@ function App() {
       alert(error.message || "Илгээхэд асуудал гарлаа. Та дахин оролдоно уу.");
     } finally {
       setSending(false);
-    }
-  };
-
-  const handleSignatureUpload = async (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    try {
-      setSignature(await readScaledImage(file));
-    } catch {
-      alert("Зургийг уншиж чадсангүй. Өөр зураг сонгоно уу.");
     }
   };
 
@@ -465,16 +465,8 @@ function App() {
                 <Field label="Аялал эхлэх огноо *">
                   <input required type="date" name="travelDate" value={form.travelDate} onChange={updateForm} />
                 </Field>
-                <Field label="Эхлэх цаг *">
-                  <input required type="time" name="departTime" value={form.departTime} onChange={updateForm} />
-                </Field>
-              </div>
-              <div className="twoCols">
                 <Field label="Аялал дуусах огноо *">
                   <input required type="date" name="returnDate" min={form.travelDate || undefined} value={form.returnDate} onChange={updateForm} />
-                </Field>
-                <Field label="Дуусах цаг *">
-                  <input required type="time" name="returnTime" value={form.returnTime} onChange={updateForm} />
                 </Field>
               </div>
 
@@ -612,70 +604,97 @@ function App() {
               </p>
             )}
 
-            {employees.map((employee, index) => (
-              <div className="employeeCard" key={index}>
-                <div className="employeeHead">
-                  <strong>{isBlast ? "Ажилтан" : "Зорчигч"} {index + 1}</strong>
-                  {employees.length > 1 && (
-                    <button
-                      type="button"
-                      className="iconBtn danger"
-                      onClick={() => removeEmployee(index)}
-                      aria-label="Устгах"
-                    >
-                      <Trash2 size={17} />
-                    </button>
-                  )}
-                </div>
+            <div className="employeeCard">
+              <div className="employeeHead">
+                <strong>Үндсэн ажилтан</strong>
+                <small>Маягтыг бөглөж буй хүн</small>
+              </div>
 
-                <Field label="Овог нэр *">
+              <Field label="Овог нэр *">
+                <input
+                  required
+                  name="employee-name"
+                  value={employees[0].name}
+                  onChange={(e) => updateEmployee(0, "name", e.target.value)}
+                  placeholder="Овог нэр"
+                />
+              </Field>
+
+              <div className="twoCols">
+                <Field label="Албан тушаал *">
                   <input
                     required
-                    name="employee-name"
-                    value={employee.name}
-                    onChange={(e) =>
-                      updateEmployee(index, "name", e.target.value)
-                    }
-                    placeholder="Овог нэр"
+                    name="employee-position"
+                    value={employees[0].position}
+                    onChange={(e) => updateEmployee(0, "position", e.target.value)}
+                    placeholder="Албан тушаал"
                   />
                 </Field>
 
-                <div className="twoCols">
-                  <Field label="Албан тушаал *">
-                    <input
-                      required
-                      name="employee-position"
-                      value={employee.position}
-                      onChange={(e) =>
-                        updateEmployee(index, "position", e.target.value)
-                      }
-                      placeholder="Албан тушаал"
-                    />
-                  </Field>
-
-                  <Field label="Утасны дугаар *">
-                    <input
-                      required
-                      name="employee-phone"
-                      type="tel"
-                      inputMode="numeric"
-                      pattern="[0-9]+"
-                      value={employee.phone}
-                      onChange={(e) =>
-                        updateEmployee(index, "phone", digitsOnly(e.target.value))
-                      }
-                      placeholder="Утас"
-                    />
-                  </Field>
-                </div>
+                <Field label="Утасны дугаар *">
+                  <input
+                    required
+                    name="employee-phone"
+                    type="tel"
+                    inputMode="numeric"
+                    pattern="[0-9]+"
+                    value={employees[0].phone}
+                    onChange={(e) => updateEmployee(0, "phone", digitsOnly(e.target.value))}
+                    placeholder="Утас"
+                  />
+                </Field>
               </div>
-            ))}
+            </div>
+
+            {employees.length > 1 && (
+              <ol className="passengerList" start={2}>
+                {employees.slice(1).map((employee, offset) => {
+                  const index = offset + 1;
+                  return (
+                    <li key={index} className="passengerRow">
+                      <span className="passengerNumber" aria-hidden="true">{index + 1}</span>
+                      <input
+                        required
+                        name="passenger-name"
+                        aria-label={`Зорчигч ${index + 1} - Овог нэр`}
+                        value={employee.name}
+                        onChange={(e) => updateEmployee(index, "name", e.target.value)}
+                        placeholder="Овог нэр"
+                      />
+                      <input
+                        required
+                        name="passenger-phone"
+                        aria-label={`Зорчигч ${index + 1} - Утасны дугаар`}
+                        type="tel"
+                        inputMode="numeric"
+                        pattern="[0-9]+"
+                        value={employee.phone}
+                        onChange={(e) => updateEmployee(index, "phone", digitsOnly(e.target.value))}
+                        placeholder="Утас"
+                      />
+                      <button
+                        type="button"
+                        className="iconBtn danger"
+                        onClick={() => removeEmployee(index)}
+                        aria-label={`Зорчигч ${index + 1} устгах`}
+                      >
+                        <Trash2 size={17} />
+                      </button>
+                    </li>
+                  );
+                })}
+              </ol>
+            )}
 
             {employees.length < maxPassengers && (
               <button type="button" className="addBtn" onClick={addEmployee}>
                 <Plus size={17} /> {isBlast ? "Ажилтан нэмэх" : "Зорчигч нэмэх"}
               </button>
             )}
+          </Section>
+
+          <Section title="Зураг" icon={<Camera size={18} />} badge={`${photos.length}/${MAX_PHOTOS}`}>
+            <PhotoPicker photos={photos} onChange={setPhotos} min={MIN_PHOTOS} max={MAX_PHOTOS} />
           </Section>
 
           {activeChecklist.length > 0 && (
@@ -701,18 +720,20 @@ function App() {
             </Section>
           )}
 
-          <Section title={isBlast ? "Аялал хийх зөвшөөрөл" : "Зөвшөөрөл ба зааварчилгаа"} icon={<BadgeCheck size={18} />}>
+          <Section title={isBlast ? "Аялал хийх зөвшөөрөл" : "Зааварчилгаа өгсөн"} icon={<BadgeCheck size={18} />}>
             <p className="helper">
-              {isBlast ? "Аялал хийхийг зөвшөөрсөн албан тушаалтан." : "Аяллыг зөвшөөрсөн болон аюулгүй ажиллагааны зааварчилгаа өгсөн албан тушаалтан."}
+              {isBlast ? "Аялал хийхийг зөвшөөрсөн албан тушаалтан." : "Аюулгүй ажиллагааны зааварчилгаа өгсөн албан тушаалтан."}
             </p>
-            <div className="twoCols">
-              <Field label="Зөвшөөрсөн: овог нэр *">
-                <input required name="approver" value={form.approver} onChange={updateForm} placeholder="Овог нэр" />
-              </Field>
-              <Field label="Албан тушаал *">
-                <input required name="approverPosition" value={form.approverPosition} onChange={updateForm} placeholder="Албан тушаал" />
-              </Field>
-            </div>
+            {isBlast && (
+              <div className="twoCols">
+                <Field label="Зөвшөөрсөн: овог нэр *">
+                  <input required name="approver" value={form.approver} onChange={updateForm} placeholder="Овог нэр" />
+                </Field>
+                <Field label="Албан тушаал *">
+                  <input required name="approverPosition" value={form.approverPosition} onChange={updateForm} placeholder="Албан тушаал" />
+                </Field>
+              </div>
+            )}
             {!isBlast && (
               <div className="twoCols">
                 <Field label="Зааварчилгаа өгсөн: овог нэр *">
@@ -726,21 +747,7 @@ function App() {
           </Section>
 
           <Section title="Зааварчилгаа ба гарын үсэг" icon={<ShieldCheck size={18} />}>
-            <div className="signatureBox">
-              <div className="signatureHeader">
-                <span>{isBlast ? "Гарын үсэг" : "Аяллын ахлагчийн гарын үсэг"}</span>
-                <label className="uploadSignature">
-                  <input type="file" accept="image/*" onChange={handleSignatureUpload} />
-                  <span>Зураг сонгох</span>
-                </label>
-              </div>
-
-              {signature ? (
-                <img className="signaturePreview" src={signature} alt="Signature preview" />
-              ) : (
-                <div className="signaturePlaceholder">Гарын үсгийн зураг оруулна уу</div>
-              )}
-            </div>
+            <SignaturePad label="Гарын үсэг *" value={signature} onChange={setSignature} />
 
             <button
               type="button"

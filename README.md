@@ -78,6 +78,15 @@ delivery fails, `/approve` offers "Имэйл илгээх" to retry. Approvers 
 alert email with a link when a request reaches them. Every step is kept with
 its time and person as the request's history, shown on `/approve`.
 
+The travelers' form: one main employee (name, position, phone) fills it in
+for the group; other passengers need only name and phone. It needs 2–8
+photos (shrunk in the browser; previews can be replaced or removed) and a
+signature drawn with a finger or mouse ("Гарын үсэг арилгах" clears it).
+Photos are stored in their own file per request and shown on `/approve`
+and in the final email. Normal trips no longer ask for start/end times or
+who approved (approval is on `/approve`); blasting trips keep their
+approver field.
+
 Forms saved on `/mechanic` before this workflow are still listed there;
 once a mechanic inspects one, it goes to the approvers like the rest.
 

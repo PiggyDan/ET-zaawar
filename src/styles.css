@@ -1258,3 +1258,140 @@ a.inboxItem:focus-visible { border-color: var(--brand); }
 .rejectBtn.outline { background: #fff; color: #b42318; border: 1.5px solid #fda29b; }
 .approveBtn:disabled,
 .rejectBtn:disabled { opacity: 0.5; cursor: default; }
+
+/* ---------- Passengers, photos, drawn signature ---------- */
+
+.employeeHead small { color: var(--muted); font-size: 12px; }
+
+.passengerList {
+  display: grid;
+  gap: 8px;
+  margin: 0 0 12px;
+  padding: 0;
+  list-style: none;
+}
+
+.passengerRow {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1.4fr) minmax(0, 1fr) 40px;
+  gap: 6px;
+  align-items: center;
+}
+
+.passengerRow input { min-height: 44px; padding: 10px 12px; }
+
+.passengerNumber {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--brand-soft);
+  color: var(--brand-dark);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+.helperWarn { color: #b54708; font-weight: 600; }
+
+.photoGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+  gap: 8px;
+  margin: 0 0 12px;
+  padding: 0;
+  list-style: none;
+}
+
+.photoGrid--view { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); }
+
+.photoTile {
+  position: relative;
+  aspect-ratio: 1;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #f9fafb;
+}
+
+.photoTile img { width: 100%; height: 100%; object-fit: cover; display: block; }
+
+.photoNumber {
+  position: absolute;
+  left: 6px;
+  bottom: 6px;
+  min-width: 22px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: rgba(16, 24, 40, 0.7);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+  text-align: center;
+}
+
+.photoAction {
+  position: absolute;
+  top: 6px;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.92);
+  color: var(--text);
+  box-shadow: 0 1px 4px rgba(16, 24, 40, 0.25);
+  cursor: pointer;
+}
+
+.photoAction:not(.photoRemove) { left: 6px; }
+.photoRemove { right: 6px; color: #b42318; }
+.photoAction input, .photoAdd input { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+
+.photoAdd { position: relative; cursor: pointer; }
+
+.clearSignature {
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fff;
+  color: #b42318;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.clearSignature:disabled { color: var(--muted); opacity: 0.6; cursor: default; }
+
+.signaturePadWrap { position: relative; }
+
+.signaturePad {
+  display: block;
+  width: 100%;
+  height: 180px;
+  border: 1.5px dashed #d0d5dd;
+  border-radius: 12px;
+  background: #fff;
+  touch-action: none;
+  cursor: crosshair;
+}
+
+.signatureHint {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: #98a2b3;
+  font-size: 13px;
+  pointer-events: none;
+}

@@ -7,6 +7,7 @@ import {
   Check,
   ChevronDown,
   ChevronRight,
+  Camera,
   ClipboardList,
   FileText,
   History,
@@ -299,10 +300,25 @@ function RequestDetail({ id, password, me }) {
             {request.employees.map((employee, index) => (
               <div key={index}>
                 <dt>{index + 1}. {employee.name}</dt>
-                <dd>{employee.position} · {employee.phone}</dd>
+                <dd>{[employee.position, employee.phone].filter(Boolean).join(" · ")}</dd>
               </div>
             ))}
           </dl>
+        </Section>
+
+        <Section title="Зураг" icon={<Camera size={18} />} badge={String(request.photos.length)}>
+          {request.photos.length === 0 ? (
+            <p className="helper">Зураггүй (зураг нэмэхээс өмнөх маягт).</p>
+          ) : (
+            <ul className="photoGrid photoGrid--view">
+              {request.photos.map((photo, index) => (
+                <li key={index} className="photoTile">
+                  <img src={photo} alt={`Зураг ${index + 1}`} />
+                  <span className="photoNumber">{index + 1}</span>
+                </li>
+              ))}
+            </ul>
+          )}
         </Section>
 
         {inspection && (
