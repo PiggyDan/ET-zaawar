@@ -1121,3 +1121,140 @@ a.inboxItem:focus-visible { border-color: var(--brand); }
   font-size: 12px;
   text-align: center;
 }
+
+/* ---------- Approval workflow ---------- */
+
+.hero--approve {
+  background: linear-gradient(135deg, #1e3a8a 0%, #172554 100%);
+  box-shadow: 0 12px 28px rgba(30, 58, 138, 0.28);
+}
+
+.codeRow {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+}
+
+.codeRow input {
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: 0.2em;
+}
+
+.codeBtn {
+  padding: 0 18px;
+  border: 0;
+  border-radius: 14px;
+  background: var(--text);
+  color: #fff;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.codeBtn:disabled { opacity: 0.4; cursor: default; }
+
+.codeInfo { margin-bottom: 14px; }
+
+.bigCode {
+  margin: 8px 0 4px;
+  padding: 14px 22px;
+  border: 2px dashed var(--brand);
+  border-radius: 16px;
+  background: var(--brand-soft);
+  color: var(--brand-dark);
+  font-size: 40px;
+  font-weight: 800;
+  letter-spacing: 0.25em;
+  font-variant-numeric: tabular-nums;
+}
+
+.codeBadge {
+  flex: 0 0 auto;
+  padding: 6px 10px;
+  border-radius: 10px;
+  background: var(--brand-soft);
+  color: var(--brand-dark);
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  font-variant-numeric: tabular-nums;
+}
+
+.newInspection {
+  margin-bottom: 14px;
+  text-decoration: none;
+}
+
+.listHeading {
+  margin: 22px 0 10px;
+  font-size: 15px;
+}
+
+.stage { font-weight: 700; }
+.stage--good { color: var(--brand-dark); }
+.stage--bad { color: #b42318; }
+.stage--wait { color: #b54708; }
+.stage--muted { color: var(--muted); }
+
+.stageBanner {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 6px 12px;
+  margin-bottom: 16px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  font-size: 14px;
+}
+
+.stageBanner span { color: var(--muted); }
+
+.summaryList dd.resultPass { color: var(--brand-dark); }
+.summaryList dd.resultFail { color: #b42318; }
+
+.timeline {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 14px;
+}
+
+.timeline li {
+  display: grid;
+  gap: 2px;
+  padding-left: 14px;
+  border-left: 3px solid var(--brand-soft);
+}
+
+.timelineWhen { color: var(--muted); font-size: 12px; }
+
+.decisionRow {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.approveBtn,
+.rejectBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 50px;
+  padding: 0 16px;
+  border: 0;
+  border-radius: 14px;
+  color: #fff;
+  font-size: 15px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.approveBtn { background: var(--brand); }
+.rejectBtn { background: #b42318; }
+.rejectBtn.outline { background: #fff; color: #b42318; border: 1.5px solid #fda29b; }
+.approveBtn:disabled,
+.rejectBtn:disabled { opacity: 0.5; cursor: default; }

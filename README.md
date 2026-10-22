@@ -43,52 +43,64 @@ Configured in `.env.local`:
 Set the same variables in the Vercel project settings for production;
 `.env.local` is not deployed.
 
-## Mechanic inspection step
+## Approval workflow
 
-Where the form goes depends on the trip:
+The workflow is chosen from the trip type:
 
-- **АТҮТ / Нийтийн тээвэр** — straight to the final recipients (`MAIL_TO`).
-- **Every other transport, and every Тэсэлгээний аялал** — onto the
-  `/mechanic` list; nothing is emailed yet. Someone tells the mechanic, who
-  opens the form there and fills in the inspection (the official Авто машин
-  үзлэгийн хуудас: every item Хэвийн / Хэвийн бус with Тэмдэглэл, plus Тоо on
-  the blasting sheet; odometer, Тэнцсэн / Тэнцээгүй, Механик дүгнэлт,
-  signature). That sends the form plus the inspection to the final
-  recipients in one email. A failed inspection is still sent on, marked
-  Тэнцээгүй with the reason.
+**Workflow A — АТҮТ / Нийтийн тээвэр (no mechanic)**
+1. Travelers submit the form.
+2. Both approvers approve on `/approve` (in any order).
+3. One consolidated email goes to the final recipients (`MAIL_TO`).
 
-### /mechanic page
+**Workflow B — every other transport, and every Тэсэлгээний аялал**
+1. A mechanic inspects the vehicle on `/mechanic` → "Шинэ үзлэг хийх"
+   (the official Авто машин үзлэгийн хуудас; the Тэсэлгээ sheet for
+   blasting trips). A passed inspection gets a 6-digit code, valid 24 hours
+   and usable once; a failed one gets no code.
+2. Travelers enter that code on their form; the inspected vehicle and
+   driver fill in and cannot be changed.
+3. Both approvers approve on `/approve`.
+4. One consolidated email (trip, travelers, inspection, approvals).
 
-`/mechanic` lists every form waiting for inspection, plus the ones checked in
-the last 7 days, behind a shared password (`MECHANIC_PASSWORD`). Once a form
-is sent it is marked checked and cannot be sent again: it is claimed before
-the final email goes out, so two mechanics cannot both submit it.
+Rules the server enforces: no stage can be skipped; each role has its own
+password; an approver decides once; any rejection (with a reason) stops the
+request; the email is claimed before sending, so it goes out once, and if
+delivery fails, `/approve` offers "Имэйл илгээх" to retry. Approvers get an
+alert email with a link when a request reaches them. Every step is kept with
+its time and person as the request's history, shown on `/approve`.
 
-The list is stored in a private Vercel Blob store on Vercel and in
-`.data/submissions.json` when run locally. To set up Blob: Vercel project →
-Storage → Create → Blob → connect it to this project. That adds
-`BLOB_STORE_ID` (or `BLOB_READ_WRITE_TOKEN` on older setups); no code change
-is needed. Without it on Vercel, non-АТҮТ forms cannot be submitted.
+Forms saved on `/mechanic` before this workflow are still listed there;
+once a mechanic inspects one, it goes to the approvers like the rest.
 
-Each form is one file that is never overwritten (about 2 writes per trip), to
-stay inside Blob's free Hobby allowance. Waiting forms are kept 30 days.
+### Storage
 
-Each stored form carries its data in a token signed with
-`MECHANIC_LINK_SECRET`, so it cannot be edited or forged.
+Each request is a folder of write-once JSON files in a private Vercel Blob
+store (`wf/r/<id>/inspection.json`, `travel.json`, `decision-<n>.json`,
+`sent.json`, plus `wf/codes/<code>.json`). The stage is worked out from
+which files exist. Locally, the same files go under `.data/workflow`
+(`WORKFLOW_STORE_DIR`). Vercel Blob's free Hobby allowance is about 2,000
+writes/lists a month; each trip uses about 4 (А) to 6 (B) writes plus page
+loads.
 
-### Environment variables for the mechanic step
+### Environment variables
 
-- `MECHANIC_PASSWORD` — the shared password for `/mechanic`.
-- `MECHANIC_LINK_SECRET` — random string, 16+ characters. Changing it
-  invalidates forms already waiting.
-- `BLOB_STORE_ID` — added by connecting the Blob store (above).
+- `MECHANIC_PASSWORD` — shared password for `/mechanic`.
+- `APPROVER_1_NAME`, `APPROVER_1_EMAIL`, `APPROVER_1_PASSWORD` — first
+  approver (Uyanga).
+- `APPROVER_2_NAME`, `APPROVER_2_EMAIL`, `APPROVER_2_PASSWORD` — second
+  approver. Both are required; passwords must differ from each other and
+  from the mechanic's. Until both are set, forms cannot be submitted.
+- `MAIL_TO` — final recipients (defaults in `api/_form-mail.js`).
+- `APP_URL` — optional base URL for links in alert emails.
+- `MECHANIC_LINK_SECRET` — still needed for forms saved before this
+  workflow.
+- `BLOB_STORE_ID` — added by connecting the Blob store.
 
 ### Testing locally
 
 Set `MAIL_OUTBOX_DIR` to write emails to a local folder (.eml + .html)
-instead of sending them. `node scripts/test-mechanic-flow.mjs` runs the whole
-flow against such an outbox. With `npm run dev`, `/outbox` lists those emails
-so the final email can be checked in the browser.
+instead of sending them; with `npm run dev`, `/outbox` lists them.
+`node scripts/test-workflow.mjs` runs both workflows end to end.
 
 ## Files
 
@@ -97,8 +109,11 @@ so the final email can be checked in the browser.
 - `api/mechanic.js` — Vercel entry point for the mechanic's page
 - `api/_link-token.js` — signs and verifies the stored form tokens
 - `api/_store.js` — the /mechanic list storage (Vercel Blob or a local file)
-- `src/MechanicInbox.jsx` — the /mechanic list page
-- `src/MechanicForm.jsx` — the mechanic's inspection page
+- `src/MechanicInbox.jsx` — the /mechanic page (new inspections, codes)
+- `src/MechanicForm.jsx` — the inspection sheet (new, and for older forms)
+- `src/ApprovalPage.jsx` — the /approve page
+- `api/_workflow.js` — both workflows, stages, approvals, the final email
+- `api/workflow.js` — Vercel entry point for /api/workflow
 - `vite.config.js` — serves the same handler locally during `npm run dev`
 
 ## Google Drive PDF archive (optional)

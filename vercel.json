@@ -1,3 +1,6 @@
 {
-  "rewrites": [{ "source": "/mechanic", "destination": "/index.html" }]
+  "rewrites": [
+    { "source": "/mechanic", "destination": "/index.html" },
+    { "source": "/approve", "destination": "/index.html" }
+  ]
 }

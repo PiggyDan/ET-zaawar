@@ -25,14 +25,13 @@ import {
   checklistFor,
   inspectionHasCount,
   inspectionSheetFor,
-  needsMechanic,
   travelRows,
   validateBlast,
   validateInspection,
   validateTravel
 } from "./_trips.js";
-import { createHash, randomUUID, timingSafeEqual } from "crypto";
-import { hasLinkSecret, signToken, verifyToken } from "./_link-token.js";
+import { createHash, timingSafeEqual } from "crypto";
+import { verifyToken } from "./_link-token.js";
 import { getStore, listRecords } from "./_store.js";
 
 const DEFAULT_RECIPIENTS = [
@@ -50,12 +49,12 @@ const DEFAULT_FROM = "Аяллын маягт <onboarding@resend.dev>";
 const MAX_SIGNATURE_BYTES = 3 * 1024 * 1024;
 
 // The copy that rides inside the mechanic's link; keeps the link short.
-const MAX_THUMB_BYTES = 24 * 1024;
+export const MAX_THUMB_BYTES = 24 * 1024;
 
 const SIGNATURE_CID = "signature";
 const MECHANIC_SIGNATURE_CID = "mechanic-signature";
 
-const esc = (value) =>
+export const esc = (value) =>
   String(value ?? "")
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
@@ -75,18 +74,18 @@ function recipients() {
 
 const isBlast = (form) => form.tripType === BLAST_TRIP;
 
-const directionOf = (form) =>
+export const directionOf = (form) =>
   isBlast(form)
     ? `${form.routeFrom} - ${form.routeTo}`
     : form.direction === "Бусад" ? form.otherDirection : form.direction;
 
-const titleOf = (form) =>
+export const titleOf = (form) =>
   isBlast(form)
     ? "Тэсрэх бодис тээвэрлэх үеийн аюулгүй ажиллагааны зааварчилгаа"
     : "Аяллын аюулгүй ажиллагааны зааварчилгаа";
 
 /** Label/value rows describing a submission, in display order. */
-const summaryRows = (form) => (isBlast(form) ? blastRows(form) : travelRows(form));
+export const summaryRows = (form) => (isBlast(form) ? blastRows(form) : travelRows(form));
 
 /** Label/value rows heading a mechanic's inspection, in display order. */
 function inspectionRows(form, inspection) {
@@ -108,6 +107,21 @@ const inspectionGroups = (form, inspection) =>
     title,
     items: items.map(({ id, label }) => ({ label, ...inspection.items[id] }))
   }));
+
+const formatWhen = (ms) =>
+  new Intl.DateTimeFormat("mn-MN", {
+    timeZone: "Asia/Ulaanbaatar",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false
+  }).format(ms);
+
+/** Label/value rows for the approvers' decisions. */
+const approvalLines = (approvals) =>
+  approvals.map(({ name, at, note }) => [name, `Зөвшөөрсөн · ${formatWhen(at)}${note ? ` · ${note}` : ""}`]);
 
 const itemDetail = ({ count, note }) =>
   [count && `тоо: ${count}`, note].filter(Boolean).join(", ");
@@ -219,7 +233,7 @@ async function uploadBufferToDrive(drive, buffer, filename, folderId) {
 }
 
 /** Turns a data URL from the browser into an email attachment. */
-function parseSignature(signature, { name = "garyn-useg", maxBytes = MAX_SIGNATURE_BYTES } = {}) {
+export function parseSignature(signature, { name = "garyn-useg", maxBytes = MAX_SIGNATURE_BYTES } = {}) {
   if (typeof signature !== "string" || !signature.startsWith("data:")) {
     return { error: "Гарын үсэг буруу форматтай байна." };
   }
@@ -244,7 +258,7 @@ function parseSignature(signature, { name = "garyn-useg", maxBytes = MAX_SIGNATU
   return { base64, buffer, contentType, filename: `${name}.${extension}` };
 }
 
-function validate(form, employees) {
+export function validate(form, employees) {
   const missing = isBlast(form) ? validateBlast(form) : validateTravel(form);
 
   if (!checklistComplete(form)) missing.push("Тээвэрлэлтийн өмнөх шалгах хуудас");
@@ -262,9 +276,9 @@ function validate(form, employees) {
 
 /**
  * The email body; with `inspection`, it includes the mechanic's findings
- * and signature.
+ * and signature, and with `approvals`, who approved it and when.
  */
-function buildHtml(form, employees, { inspection } = {}) {
+function buildHtml(form, employees, { inspection, approvals } = {}) {
   const row = (label, value) => `
         <tr>
           <td style="padding:8px 12px; background:#f9fafb; border:1px solid #e5e7eb; width:200px; vertical-align:top;">${esc(label)}</td>
@@ -320,6 +334,10 @@ function buildHtml(form, employees, { inspection } = {}) {
             .join("")}${signatureRow("Механикийн гарын үсэг", MECHANIC_SIGNATURE_CID)}`
     : "";
 
+  const approvalRowsHtml = approvals?.length
+    ? `${groupRow("Батлагдсан")}${approvalLines(approvals).map(([label, value]) => row(label, value)).join("")}`
+    : "";
+
   const heading = isBlast(form)
     ? ["Тэсрэх бодис тээвэрлэх үеийн", "аюулгүй ажиллагааны зааварчилгаа"]
     : ["АТҮТ болон замын унаагаар зорчих үеийн", "аюулгүй ажиллагааны зааварчилгаа"];
@@ -341,7 +359,7 @@ function buildHtml(form, employees, { inspection } = {}) {
           <tr>
             <td style="padding:8px 12px; background:#f9fafb; border:1px solid #e5e7eb; vertical-align:top;">Танилцсан эсэх</td>
             <td style="padding:8px 12px; border:1px solid #e5e7eb;">Дээрх шаардлагыг бүрэн уншиж танилцсан, ойлгосон бөгөөд мөрдөхөө зөвшөөрсөн.</td>
-          </tr>${signatureRow("Гарын үсэг", SIGNATURE_CID)}${inspectionRowsHtml}
+          </tr>${signatureRow("Гарын үсэг", SIGNATURE_CID)}${inspectionRowsHtml}${approvalRowsHtml}
         </table>
 
         <p style="margin:20px 0 0; font-size:12px; color:#6b7280;">
@@ -353,7 +371,7 @@ function buildHtml(form, employees, { inspection } = {}) {
 </html>`;
 }
 
-function buildText(form, employees, { inspection } = {}) {
+function buildText(form, employees, { inspection, approvals } = {}) {
   const lines = [titleOf(form), ""];
 
   lines.push(...summaryRows(form).map(([label, value]) => `${label}: ${value || "-"}`), "");
@@ -377,15 +395,22 @@ function buildText(form, employees, { inspection } = {}) {
     );
   }
 
+  if (approvals?.length) {
+    lines.push("", "Батлагдсан:", ...approvalLines(approvals).map(([label, value]) => `${label}: ${value}`));
+  }
+
   lines.push("", "Гарын үсэг хавсралтад байна.");
 
   return lines.join("\n");
 }
 
-function buildSubject(form, employees, { inspection } = {}) {
+function buildSubject(form, employees, { inspection, approvals } = {}) {
   const names = employees.map((employee) => employee.name).filter(Boolean).join(", ");
   const prefix = isBlast(form) ? "Тэсэлгээний аялал" : "Аяллын зааварчилгаа";
-  const stage = inspection ? `Механик: ${inspection.result} | ` : "";
+  const stage = [approvals?.length && "Батлагдсан", inspection && `Механик: ${inspection.result}`]
+    .filter(Boolean)
+    .map((part) => `${part} | `)
+    .join("");
 
   return `${stage}${prefix} | ${form.travelDate} | ${directionOf(form)} | ${names}`;
 }
@@ -493,7 +518,7 @@ async function writeToOutbox({ to, subject, html, text, images }) {
 }
 
 /** Returns an error response if no mail provider is usable, else null. */
-function mailConfigError() {
+export function mailConfigError() {
   if (process.env.MAIL_OUTBOX_DIR) return null;
 
   const useSmtp = Boolean(process.env.SMTP_HOST);
@@ -511,7 +536,7 @@ function mailConfigError() {
   return null;
 }
 
-function deliver(message) {
+export function deliver(message) {
   if (process.env.MAIL_OUTBOX_DIR) return writeToOutbox(message);
   return process.env.SMTP_HOST ? sendWithSmtp(message) : sendWithResend(message);
 }
@@ -565,13 +590,16 @@ async function archiveToDrive(form, employees, signature, inspection, mechanicSi
   }
 }
 
-/** Emails the finished form (with the inspection, if any) to the final recipients. */
-async function sendFinal(form, employees, signature, inspection, mechanicSignature) {
+/**
+ * Emails the finished form (with the inspection and approvals, if any) to
+ * the final recipients: the one consolidated email.
+ */
+export async function sendFinal(form, employees, signature, inspection, mechanicSignature, approvals) {
   const message = {
     to: recipients(),
-    subject: buildSubject(form, employees, { inspection }),
-    html: buildHtml(form, employees, { inspection }),
-    text: buildText(form, employees, { inspection }),
+    subject: buildSubject(form, employees, { inspection, approvals }),
+    html: buildHtml(form, employees, { inspection, approvals }),
+    text: buildText(form, employees, { inspection, approvals }),
     images: [[signature, SIGNATURE_CID], [mechanicSignature, MECHANIC_SIGNATURE_CID]]
   };
 
@@ -588,65 +616,8 @@ async function sendFinal(form, employees, signature, inspection, mechanicSignatu
   return { status: 200, body: { ok: true, id, stage: "final", to: message.to } };
 }
 
-/**
- * Validates the submitted form. Public-transport trips are emailed to the
- * final recipients; every other trip waits on the /mechanic list until a
- * mechanic inspects it, and that sends everything on in one email.
- * Returns a { status, body } pair the HTTP layer can send as-is.
- */
-export async function sendFormMail(payload) {
-  const form = payload?.form;
-  const employees = Array.isArray(payload?.employees) ? payload.employees : [];
-
-  if (!form || typeof form !== "object") {
-    return { status: 400, body: { error: "Маягтын мэдээлэл дутуу байна." } };
-  }
-
-  const missing = validate(form, employees);
-  if (missing.length > 0) {
-    return { status: 400, body: { error: `Дутуу байна: ${missing[0]}` } };
-  }
-
-  const signature = parseSignature(payload?.signature);
-  if (signature.error) {
-    return { status: 400, body: { error: signature.error } };
-  }
-
-  // Only public-transport trips email now; the mechanic route emails when
-  // the mechanic submits, and that step checks the mail settings.
-  if (!needsMechanic(form)) {
-    const configError = mailConfigError();
-    if (configError) return configError;
-    return sendFinal(form, employees, signature);
-  }
-
-  // The small signature copy is what reaches the final email.
-  const thumb = parseSignature(payload?.signatureThumb, { maxBytes: MAX_THUMB_BYTES });
-  if (thumb.error) {
-    return { status: 400, body: { error: thumb.error } };
-  }
-
-  const store = await getStore();
-  if (!hasLinkSecret() || !store) {
-    console.error("[api/send] mechanic route needs MECHANIC_LINK_SECRET (16+ chars) and a Blob store");
-    return { status: 500, body: { error: "Механикийн жагсаалтын тохиргоо дутуу байна (MECHANIC_LINK_SECRET, Vercel Blob)." } };
-  }
-
-  const id = randomUUID();
-  const token = signToken({ id, form, employees, signature: payload.signatureThumb });
-
-  try {
-    await store.savePending({ id, token, createdAt: Date.now(), status: "pending", summary: recordSummary(form, employees) });
-  } catch (error) {
-    console.error("[api/send] could not save submission for /mechanic:", error);
-    return { status: 502, body: { error: "Маягтыг хадгалж чадсангүй. Та дахин оролдоно уу." } };
-  }
-
-  return { status: 200, body: { ok: true, id, stage: "mechanic" } };
-}
-
 /** Short description of a submission for the /mechanic list. */
-const recordSummary = (form, employees) => ({
+export const recordSummary = (form, employees) => ({
   tripType: form.tripType,
   company: form.company,
   vehicle: form.vehicle,
@@ -656,7 +627,15 @@ const recordSummary = (form, employees) => ({
   people: employees.map((employee) => employee.name).filter(Boolean)
 });
 
-function passwordMatches(given) {
+/** Constant-time check of a password against an expected value. */
+export function secretMatches(given, expected) {
+  if (!expected || typeof given !== "string") return false;
+  // Hash both, so the comparison takes the same time whatever the length.
+  const digest = (value) => createHash("sha256").update(value).digest();
+  return timingSafeEqual(digest(given), digest(expected));
+}
+
+export function passwordMatches(given) {
   const expected = process.env.MECHANIC_PASSWORD;
   if (!expected || typeof given !== "string") return false;
   // Hash both, so the comparison takes the same time whatever the length.
@@ -698,11 +677,45 @@ const invalidLink = {
 };
 
 /**
- * The mechanic page's backend. With only `token`, returns the submission
- * for display; with `inspection` and `signature` as well, validates the
- * mechanic's form and emails everything to the final recipients.
+ * A mechanic's inspection as submitted, reduced to the fields and sheet
+ * items of this trip's inspection sheet, so nothing else reaches the email.
  */
-export async function handleMechanic(payload) {
+export function cleanInspection(form, given = {}) {
+  const field = (key) => String(given?.[key] ?? "").trim();
+
+  const items = {};
+  inspectionSheetFor(form).forEach(({ items: groupItems }) => {
+    groupItems.forEach(({ id }) => {
+      const item = given?.items?.[id];
+      if (ITEM_STATUSES.includes(item?.status)) {
+        items[id] = {
+          status: item.status,
+          count: inspectionHasCount(form) ? String(item.count ?? "").trim() : "",
+          note: String(item.note ?? "").trim()
+        };
+      }
+    });
+  });
+
+  return {
+    odometer: field("odometer"),
+    motoHours: field("motoHours"),
+    mechanic: field("mechanic"),
+    mechanicPhone: field("mechanicPhone"),
+    result: given?.result,
+    note: field("note"),
+    remarks: field("remarks"),
+    items
+  };
+}
+
+/**
+ * Forms saved before the approval workflow. With only `token`, returns the submission
+ * for display; with `inspection` and `signature` as well, validates the
+ * mechanic's form and passes the trip on to the approvers, like a trip
+ * from the current workflow, so it cannot skip approval.
+ */
+export async function handleMechanic(payload, { origin } = {}) {
   const data = verifyToken(payload?.token);
   if (!data?.form || !Array.isArray(data.employees)) return invalidLink;
 
@@ -732,34 +745,7 @@ export async function handleMechanic(payload) {
     return { status: 409, body: { error: `Энэ маягтыг ${done.mechanic} аль хэдийн шалгаж илгээсэн байна.` } };
   }
 
-  const given = payload.inspection ?? {};
-  const field = (key) => String(given[key] ?? "").trim();
-
-  // Keep only this trip's sheet items, so nothing else reaches the email.
-  const items = {};
-  inspectionSheetFor(form).forEach(({ items: groupItems }) => {
-    groupItems.forEach(({ id }) => {
-      const item = given.items?.[id];
-      if (ITEM_STATUSES.includes(item?.status)) {
-        items[id] = {
-          status: item.status,
-          count: inspectionHasCount(form) ? String(item.count ?? "").trim() : "",
-          note: String(item.note ?? "").trim()
-        };
-      }
-    });
-  });
-
-  const inspection = {
-    odometer: field("odometer"),
-    motoHours: field("motoHours"),
-    mechanic: field("mechanic"),
-    mechanicPhone: field("mechanicPhone"),
-    result: given.result,
-    note: field("note"),
-    remarks: field("remarks"),
-    items
-  };
+  const inspection = cleanInspection(form, payload.inspection);
 
   const missing = validateInspection(form, inspection);
   if (missing.length > 0) {
@@ -771,13 +757,8 @@ export async function handleMechanic(payload) {
     return { status: 400, body: { error: mechanicSignature.error } };
   }
 
-  const configError = mailConfigError();
-  if (configError) return configError;
-
-  const signature = parseSignature(data.signature, { maxBytes: MAX_THUMB_BYTES });
-
-  // Claim the form before emailing, so two mechanics sending at once cannot
-  // both get through; the claim is released if the email fails.
+  // Claim the old record, so two mechanics sending at once cannot both
+  // pass it on; the claim is released if handing it over fails.
   if (store) {
     const claimed = await store
       .claimDone({
@@ -789,7 +770,6 @@ export async function handleMechanic(payload) {
         done: { at: Date.now(), mechanic: inspection.mechanic, result: inspection.result }
       })
       .catch((error) => {
-        // Storage trouble must not stop the inspection reaching the recipients.
         console.error("[api] could not claim submission:", error);
         return null;
       });
@@ -803,12 +783,21 @@ export async function handleMechanic(payload) {
     }
   }
 
-  const sent = await sendFinal(form, employees, signature.error ? null : signature, inspection, mechanicSignature);
+  // Loaded here: the workflow module imports this one.
+  const { startFromLegacy } = await import("./_workflow.js");
+  const handed = await startFromLegacy({
+    id: data.id,
+    form,
+    employees,
+    signature: data.signature,
+    inspection,
+    mechanicSignature: payload.signature
+  }, { origin });
 
   if (store) {
-    const settle = sent.status === 200 ? store.finishDone(data.id) : store.releaseDone(data.id);
+    const settle = handed.status === 200 ? store.finishDone(data.id) : store.releaseDone(data.id);
     await settle.catch((error) => console.error("[api] could not update submission:", error));
   }
 
-  return sent;
+  return handed;
 }

@@ -48,6 +48,44 @@ export function readScaledImage(file) {
   });
 }
 
+// Session storage can be unavailable (private mode, blocked site data), in
+// which case the password is simply asked for again.
+export function sessionValue(key) {
+  try {
+    return sessionStorage.getItem(key) || "";
+  } catch {
+    return "";
+  }
+}
+
+export function setSessionValue(key, value) {
+  try {
+    if (value) sessionStorage.setItem(key, value);
+    else sessionStorage.removeItem(key);
+  } catch {
+    // Not remembered.
+  }
+}
+
+/** POSTs JSON to an /api route; throws the server's error message. */
+export async function postJson(url, body) {
+  const response = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const error = new Error(data.error || "Хүсэлт амжилтгүй боллоо.");
+    error.status = response.status;
+    throw error;
+  }
+  return data;
+}
+
+export const formatTime = (ms) =>
+  new Date(ms).toLocaleString("mn-MN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
+
 function CompanyLogo() {
   return (
     <img

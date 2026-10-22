@@ -23,8 +23,9 @@ import {
 } from "lucide-react";
 import "./styles.css";
 import SafetyReader from "./SafetyReader";
-import MechanicForm, { mechanicToken } from "./MechanicForm";
+import MechanicForm, { NewInspection, isNewInspection, mechanicToken } from "./MechanicForm";
 import MechanicInbox from "./MechanicInbox";
+import ApprovalPage from "./ApprovalPage";
 import { AppBar, ChoiceField, Field, Section, readScaledImage, scaleDataUrl } from "./ui";
 import {
   BLAST_TRIP,
@@ -35,7 +36,6 @@ import {
   YES,
   YES_NO,
   checklistFor,
-  needsMechanic,
   validateBlast,
   validateTravel
 } from "../api/_trips.js";
@@ -157,6 +157,10 @@ function App() {
 
   const [form, setForm] = useState(initialForm);
   const [checklist, setChecklist] = useState([]);
+  // Workflow B: the mechanic's code, and the inspected vehicle it unlocks.
+  const [codeInput, setCodeInput] = useState("");
+  const [codeInfo, setCodeInfo] = useState(null);
+  const [checkingCode, setCheckingCode] = useState(false);
 
   const isBlast = form.tripType === BLAST_TRIP;
   const isPublicTransport = !isBlast && form.transport === PUBLIC_TRANSPORT;
@@ -179,6 +183,29 @@ function App() {
     setChecklist([]);
     setAccepted(false);
     setShowSafety(false);
+    setCodeInput("");
+    setCodeInfo(null);
+  };
+
+  const checkCode = async () => {
+    if (checkingCode) return;
+    setCheckingCode(true);
+    try {
+      const response = await fetch("/api/workflow", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "code", code: codeInput })
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || "Кодыг шалгаж чадсангүй.");
+      if (data.tripType !== form.tripType) throw new Error(`Энэ механикийн код "${data.tripType}"-д зориулагдсан.`);
+      setCodeInfo({ ...data, code: codeInput });
+    } catch (error) {
+      setCodeInfo(null);
+      alert(error.message);
+    } finally {
+      setCheckingCode(false);
+    }
   };
 
   const toggleCheck = (item) =>
@@ -205,13 +232,17 @@ function App() {
     setEmployees(employees.filter((_, i) => i !== index));
   };
 
-  /** The form as the server expects it. */
+  /**
+   * The form as the server expects it. With a mechanic code, the vehicle
+   * and driver are the inspected ones; the server enforces that too.
+   */
   const payloadForm = () => ({
     ...form,
-    driver: isPublicTransport ? "" : form.driver,
-    driverPhone: isPublicTransport ? "" : form.driverPhone,
-    vehicle: isPublicTransport ? "" : `${form.vehicle.trim()}, ${form.vehiclePlate.trim()}`,
-    vehiclePlate: isPublicTransport ? "" : form.vehiclePlate,
+    inspectionCode: isPublicTransport ? "" : codeInfo?.code || "",
+    driver: isPublicTransport ? "" : codeInfo?.driver || "",
+    driverPhone: isPublicTransport ? "" : codeInfo?.driverPhone || "",
+    vehicle: isPublicTransport ? "" : codeInfo?.vehicle || "",
+    vehiclePlate: "",
     starlink: isPublicTransport ? "" : form.starlink,
     gps: isPublicTransport ? "" : form.gps,
     checklist: activeChecklist.filter((item) => checklist.includes(item))
@@ -223,7 +254,8 @@ function App() {
     if (sending) return;
 
     const sent = payloadForm();
-    const missing = isBlast ? validateBlast(sent) : validateTravel(sent);
+    const missing = !isPublicTransport && !codeInfo ? ["Механикийн код (шалгах товч дарна уу)"] : [];
+    missing.push(...(isBlast ? validateBlast(sent) : validateTravel(sent)));
 
     if (!activeChecklist.every((item) => checklist.includes(item))) missing.push("Шалгах хуудас");
 
@@ -244,11 +276,8 @@ function App() {
     setSending(true);
 
     try {
-      // A small copy of the signature rides in the mechanic's link, so it
-      // can reach the final email without a database.
-      const signatureThumb = needsMechanic(form)
-        ? await scaleDataUrl(signature, 320, { quality: 0.6, force: true })
-        : undefined;
+      // A small copy of the signature is stored for the consolidated email.
+      const signatureThumb = await scaleDataUrl(signature, 320, { quality: 0.6, force: true });
 
       const response = await fetch("/api/send", {
         method: "POST",
@@ -276,6 +305,8 @@ function App() {
       setChecklist([]);
       setForm(initialForm());
       setShowSafety(false);
+      setCodeInput("");
+      setCodeInfo(null);
       window.scrollTo({ top: 0, behavior: "smooth" });
     } catch (error) {
       alert(error.message || "Илгээхэд асуудал гарлаа. Та дахин оролдоно уу.");
@@ -305,9 +336,7 @@ function App() {
           </div>
           <h2>Амжилттай илгээгдлээ</h2>
           <p>
-            {submitted === "mechanic"
-              ? "Маягт механикийн жагсаалтад орлоо. Механикт мэдэгдэнэ үү. Механик тээврийн хэрэгслийг шалгаж баталгаажуулсны дараа хариуцсан ажилтнуудад илгээгдэнэ."
-              : "Аяллын мэдээлэл бүртгэгдэж, хариуцсан ажилтнуудад илгээгдлээ."}
+            Аяллын хуудас батлах хоёр хүнд илгээгдлээ. Хоёулаа зөвшөөрсний дараа хариуцсан ажилтнуудад нэгдсэн имэйл илгээгдэнэ.
           </p>
           <button type="button" className="secondaryBtn" onClick={() => setSubmitted(false)}>
             <RotateCcw size={18} /> Шинэ маягт бөглөх
@@ -510,7 +539,16 @@ function App() {
             )}
 
             {!isPublicTransport && (
-              <DriverVehicleFields form={form} setForm={setForm} updateForm={updateForm} />
+              <MechanicCode
+                value={codeInput}
+                onChange={(value) => {
+                  setCodeInput(value);
+                  if (codeInfo && value !== codeInfo.code) setCodeInfo(null);
+                }}
+                onCheck={checkCode}
+                checking={checkingCode}
+                info={codeInfo}
+              />
             )}
 
             {isBlast && (
@@ -804,63 +842,40 @@ function App() {
   );
 }
 
-function DriverVehicleFields({ form, setForm, updateForm }) {
+/**
+ * Workflow B: the 6-digit code the mechanic gave after a passed inspection.
+ * Once checked, it shows the inspected vehicle and driver, which the trip
+ * then uses as they are.
+ */
+function MechanicCode({ value, onChange, onCheck, checking, info }) {
   return (
     <>
-      <div className="twoCols">
-      <Field label="Жолоочийн нэр *">
-        <input
-          required
-          name="driver"
-          value={form.driver}
-          onChange={updateForm}
-          placeholder="Жишээ: Бат"
-        />
-      </Field>
-      <Field label="Жолоочийн утасны дугаар *">
-        <input
-          required
-          name="driverPhone"
-          type="tel"
-          inputMode="numeric"
-          pattern="[0-9]+"
-          value={form.driverPhone}
-          onChange={(e) => setForm({ ...form, driverPhone: digitsOnly(e.target.value) })}
-          placeholder="Жишээ: 99112233"
-        />
-      </Field>
-      </div>
-
-      <div className="twoCols">
-      <Field label="Автомашины марк *">
-        <input
-          required
-          name="vehicle"
-          value={form.vehicle}
-          onChange={updateForm}
-          placeholder="Жишээ: Lexus LX700"
-        />
-      </Field>
-      <Field label="Улсын дугаар *">
-        <div className="vehiclePlate">
-          <span className="plateCountry" aria-hidden="true">MNG</span>
+      <p className="ruleNote">
+        Энэ аялалд механикийн үзлэг шаардлагатай. Механик тээврийн хэрэгслийг шалгаж тэнцсэний дараа өгсөн 6 оронтой кодыг оруулна уу.
+      </p>
+      <Field label="Механикийн код *">
+        <div className="codeRow">
           <input
-            required
-            aria-label="Улсын дугаар"
-            name="vehiclePlate"
-            value={form.vehiclePlate}
-            onChange={(e) => {
-              const value = e.target.value.toUpperCase().replace(/[\s-]/g, "");
-              setForm({ ...form, vehiclePlate: value.length > 4 ? `${value.slice(0, 4)} ${value.slice(4)}` : value });
-            }}
-            pattern="[0-9]{4} [А-ЯӨҮЁ]{3}"
-            maxLength={8}
-            placeholder="9911 УБА"
-            title="4 орон тоо, 3 кирилл үсэг оруулна уу. Жишээ: 9911 УБА"
+            name="inspectionCode"
+            inputMode="numeric"
+            autoComplete="one-time-code"
+            maxLength={6}
+            value={value}
+            onChange={(e) => onChange(digitsOnly(e.target.value))}
+            placeholder="Жишээ: 482915"
           />
+          <button type="button" className="codeBtn" onClick={onCheck} disabled={value.length !== 6 || checking}>
+            {checking ? "Шалгаж байна..." : "Шалгах"}
+          </button>
         </div>
       </Field>
-      </div>
+      {info && (
+        <dl className="summaryList codeInfo">
+          <div><dt>Автомашин</dt><dd>{info.vehicle}</dd></div>
+          <div><dt>Жолооч</dt><dd>{info.driver} · {info.driverPhone}</dd></div>
+          <div><dt>Механик</dt><dd>{info.mechanic} · Тэнцсэн</dd></div>
+        </dl>
+      )}
     </>
   );
 }
@@ -999,7 +1014,11 @@ function SafetyBlock({ title, children }) {
   );
 }
 
-/** /mechanic lists waiting forms; a #mechanic=<token> link opens one. */
+/**
+ * Routes: /mechanic (inspections; #new starts one, #mechanic=<token> opens
+ * a form saved before the approval workflow), /approve (#request=<id> opens
+ * one), and the travelers' form everywhere else.
+ */
 function Root() {
   const [hash, setHash] = useState(window.location.hash);
 
@@ -1012,9 +1031,14 @@ function Root() {
     return () => window.removeEventListener("hashchange", onHashChange);
   }, []);
 
+  const path = window.location.pathname.replace(/\/+$/, "");
   const page = mechanicToken()
     ? <MechanicForm key={hash} />
-    : window.location.pathname.replace(/\/+$/, "") === "/mechanic" ? <MechanicInbox /> : <App />;
+    : path === "/mechanic"
+      ? isNewInspection() ? <NewInspection key={hash} /> : <MechanicInbox key={hash} />
+      : path === "/approve"
+        ? <ApprovalPage key={hash} />
+        : <App />;
 
   return (
     <>

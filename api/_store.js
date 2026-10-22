@@ -145,6 +145,108 @@ async function fileStore() {
   };
 }
 
+/**
+ * Plain file storage for the approval workflow (api/_workflow.js): JSON
+ * files by path, written once and never overwritten, so a second write to
+ * the same path fails and can serve as a claim.
+ *
+ *   putOnce(path, data) → true, or false if the path already exists
+ *   read(path)          → data or null
+ *   list(prefix)        → [{ path, uploadedAt }]
+ *   remove(paths)
+ */
+async function blobRaw() {
+  const { del, get, list, put } = await import("@vercel/blob");
+
+  return {
+    async putOnce(path, data) {
+      try {
+        await put(path, JSON.stringify(data), {
+          access: "private",
+          contentType: "application/json",
+          addRandomSuffix: false,
+          allowOverwrite: false
+        });
+        return true;
+      } catch (error) {
+        if (/already exists/i.test(error.message)) return false;
+        throw error;
+      }
+    },
+    async read(path, { fresh = false } = {}) {
+      const result = await get(path, { access: "private", useCache: !fresh });
+      return result?.statusCode === 200 ? JSON.parse(await new Response(result.stream).text()) : null;
+    },
+    async list(prefix) {
+      const files = [];
+      let cursor;
+      do {
+        const page = await list({ prefix, cursor, limit: 1000 });
+        files.push(...page.blobs.map((blob) => ({ path: blob.pathname, uploadedAt: new Date(blob.uploadedAt).getTime() })));
+        cursor = page.hasMore ? page.cursor : undefined;
+      } while (cursor);
+      return files;
+    },
+    async remove(paths) {
+      if (paths.length > 0) await del(paths);
+    }
+  };
+}
+
+async function fileRaw() {
+  const { mkdir, open, readFile, readdir, rm, stat } = await import("fs/promises");
+  const pathModule = await import("path");
+  const root = process.env.WORKFLOW_STORE_DIR || pathModule.join(process.cwd(), ".data", "workflow");
+  const full = (path) => pathModule.join(root, ...path.split("/"));
+
+  const walk = async (dir) => {
+    const entries = await readdir(dir, { withFileTypes: true }).catch(() => []);
+    const nested = await Promise.all(
+      entries.map((entry) => (entry.isDirectory() ? walk(pathModule.join(dir, entry.name)) : [pathModule.join(dir, entry.name)]))
+    );
+    return nested.flat();
+  };
+
+  return {
+    async putOnce(path, data) {
+      await mkdir(pathModule.dirname(full(path)), { recursive: true });
+      try {
+        // "wx" fails if the file exists: the same claim semantics as Blob.
+        const handle = await open(full(path), "wx");
+        await handle.writeFile(JSON.stringify(data, null, 2));
+        await handle.close();
+        return true;
+      } catch (error) {
+        if (error.code === "EEXIST") return false;
+        throw error;
+      }
+    },
+    async read(path) {
+      return JSON.parse(await readFile(full(path), "utf8").catch(() => "null"));
+    },
+    async list(prefix) {
+      const files = await walk(root);
+      const results = await Promise.all(
+        files.map(async (file) => ({
+          path: pathModule.relative(root, file).split(pathModule.sep).join("/"),
+          uploadedAt: (await stat(file)).mtimeMs
+        }))
+      );
+      return results.filter((file) => file.path.startsWith(prefix));
+    },
+    async remove(paths) {
+      await Promise.all(paths.map((path) => rm(full(path), { force: true })));
+    }
+  };
+}
+
+/** The workflow's file storage (Blob on Vercel, a folder locally), or null. */
+export async function getRawStore() {
+  if (process.env.BLOB_STORE_ID || process.env.BLOB_READ_WRITE_TOKEN) return blobRaw();
+  if (process.env.VERCEL) return null;
+  return fileRaw();
+}
+
 /** The configured store, or null when there is none. */
 export async function getStore() {
   // A store connected from the dashboard sets BLOB_STORE_ID and signs in with

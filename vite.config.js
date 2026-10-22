@@ -1,12 +1,16 @@
 import { defineConfig, loadEnv } from "vite";
 import react from "@vitejs/plugin-react";
-import { handleMechanic, listForMechanic, sendFormMail } from "./api/_form-mail.js";
+import { handleMechanic, listForMechanic } from "./api/_form-mail.js";
+import { originOf } from "./api/_http.js";
+import { handleWorkflow, submitTravel } from "./api/_workflow.js";
 
 const MAX_BODY_BYTES = 6 * 1024 * 1024;
 
 const routes = {
-  "/api/send": (payload) => sendFormMail(payload),
-  "/api/mechanic": (payload) => (payload?.action === "list" ? listForMechanic(payload) : handleMechanic(payload))
+  "/api/send": (payload, origin) => submitTravel(payload, { origin }),
+  "/api/workflow": (payload, origin) => handleWorkflow(payload, { origin }),
+  "/api/mechanic": (payload, origin) =>
+    payload?.action === "list" ? listForMechanic(payload) : handleMechanic(payload, { origin })
 };
 
 /** Serves the /api routes during `npm run dev`, mirroring the Vercel functions. */
@@ -41,7 +45,7 @@ function devApi() {
 
             const payload = JSON.parse(Buffer.concat(chunks).toString("utf8"));
 
-            const { status, body } = await handle(payload);
+            const { status, body } = await handle(payload, originOf(req));
 
             return reply(status, body);
           } catch (error) {
