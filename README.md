@@ -74,12 +74,14 @@ Rules the server enforces: no stage can be skipped; each role has its own
 password; an approver decides once; any rejection (with a reason) stops the
 request; every configured approver must approve (today only Uyanga; setting
 `APPROVER_2_*` would make it two); the email is claimed before sending, so it goes out once, and if
-delivery fails, `/approve` offers "Имэйл илгээх" to retry. Approvers get an
-alert email with a link when a request reaches them. Every step is kept with
+delivery fails, `/approve` offers "Имэйл илгээх" to retry. Approvers check
+`/approve` themselves; an alert email is sent only if `APPROVER_1_EMAIL` is set
+(it is not, by choice). Every step is kept with
 its time and person as the request's history, shown on `/approve`.
 
 The travelers' form: one main employee (name, position, phone) fills it in
-for the group; other passengers need only name and phone. It needs 2–8
+for the group (up to 50 people; 4 on blasting trips); other passengers need
+only name and phone. It needs 2–8
 photos (shrunk in the browser; previews can be replaced or removed) and a
 signature drawn with a finger or mouse ("Гарын үсэг арилгах" clears it).
 Photos are stored in their own file per request and shown on `/approve`

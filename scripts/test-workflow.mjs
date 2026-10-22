@@ -272,6 +272,21 @@ await test("Normal trips no longer ask who approved (only who instructed); blast
   newMail();
 });
 
+await test("Without an approver email, nobody is alerted, but approval and the final email still work", async () => {
+  const saved = process.env.APPROVER_1_EMAIL;
+  process.env.APPROVER_1_EMAIL = "";
+  try {
+    const many = [employees[0], ...Array.from({ length: 49 }, (_, i) => ({ name: `Зорчигч ${i + 2}`, phone: "99000000" }))];
+    const { status, body } = await submitTravel({ form: atut(), employees: many, signature: PNG, signatureThumb: PNG, photos: PHOTOS }, { origin: ORIGIN });
+    assert.equal(status, 200, "50 passengers accepted");
+    assert.equal(newMail().length, 0, "no alert email");
+    await decide("uyanga-pw", body.id);
+    assert.equal(finals(newMail()).length, 1);
+  } finally {
+    process.env.APPROVER_1_EMAIL = saved;
+  }
+});
+
 /* ---------- Workflow B: mechanic first ---------- */
 
 let codeB;

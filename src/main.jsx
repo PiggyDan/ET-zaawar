@@ -44,7 +44,7 @@ import {
 const emptyEmployee = () => ({ name: "", position: "", phone: "" });
 
 /** Passenger rows on the Аяллын хуудас; the blasting team stays small. */
-const MAX_PASSENGERS = { [NORMAL_TRIP]: 18, [BLAST_TRIP]: 4 };
+const MAX_PASSENGERS = { [NORMAL_TRIP]: 50, [BLAST_TRIP]: 4 };
 
 /** Photos of the group / vehicle the travelers attach. */
 const MIN_PHOTOS = 2;
