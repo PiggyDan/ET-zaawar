@@ -49,7 +49,7 @@ The workflow is chosen from the trip type:
 
 **Workflow A — АТҮТ / Нийтийн тээвэр (no mechanic)**
 1. Travelers submit the form.
-2. Both approvers approve on `/approve` (in any order).
+2. Uyanga approves on `/approve`.
 3. One consolidated email goes to the final recipients (`MAIL_TO`).
 
 **Workflow B — every other transport, and every Тэсэлгээний аялал**
@@ -59,12 +59,13 @@ The workflow is chosen from the trip type:
    and usable once; a failed one gets no code.
 2. Travelers enter that code on their form; the inspected vehicle and
    driver fill in and cannot be changed.
-3. Both approvers approve on `/approve`.
+3. Uyanga approves on `/approve`.
 4. One consolidated email (trip, travelers, inspection, approvals).
 
 Rules the server enforces: no stage can be skipped; each role has its own
 password; an approver decides once; any rejection (with a reason) stops the
-request; the email is claimed before sending, so it goes out once, and if
+request; every configured approver must approve (today only Uyanga; setting
+`APPROVER_2_*` would make it two); the email is claimed before sending, so it goes out once, and if
 delivery fails, `/approve` offers "Имэйл илгээх" to retry. Approvers get an
 alert email with a link when a request reaches them. Every step is kept with
 its time and person as the request's history, shown on `/approve`.
@@ -85,11 +86,11 @@ loads.
 ### Environment variables
 
 - `MECHANIC_PASSWORD` — shared password for `/mechanic`.
-- `APPROVER_1_NAME`, `APPROVER_1_EMAIL`, `APPROVER_1_PASSWORD` — first
-  approver (Uyanga).
-- `APPROVER_2_NAME`, `APPROVER_2_EMAIL`, `APPROVER_2_PASSWORD` — second
-  approver. Both are required; passwords must differ from each other and
-  from the mechanic's. Until both are set, forms cannot be submitted.
+- `APPROVER_1_NAME`, `APPROVER_1_EMAIL`, `APPROVER_1_PASSWORD` — the
+  approver (Uyanga). Required: until it is set, forms cannot be submitted.
+- `APPROVER_2_NAME`, `APPROVER_2_EMAIL`, `APPROVER_2_PASSWORD` — optional
+  second approver; if set, both must approve. Approver passwords must differ
+  from each other and from the mechanic's.
 - `MAIL_TO` — final recipients (defaults in `api/_form-mail.js`).
 - `APP_URL` — optional base URL for links in alert emails.
 - `MECHANIC_LINK_SECRET` — still needed for forms saved before this

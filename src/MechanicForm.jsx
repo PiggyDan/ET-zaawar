@@ -519,7 +519,7 @@ export default function MechanicForm() {
   if (done) {
     return (
       <Notice icon={<CheckCircle2 size={44} strokeWidth={2.2} />} title="Үзлэг илгээгдлээ">
-        <p>Аяллын хуудас болон таны үзлэг батлах хоёр хүнд илгээгдлээ.</p>
+        <p>Аяллын хуудас болон таны үзлэг батлагчид илгээгдлээ.</p>
       </Notice>
     );
   }

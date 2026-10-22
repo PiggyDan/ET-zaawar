@@ -2,12 +2,15 @@
  * The approval workflow.
  *
  * Workflow A — АТҮТ / Нийтийн тээвэр (no mechanic):
- *   travelers submit → both approvers approve → one consolidated email.
+ *   travelers submit → the approver approves → one consolidated email.
  *
  * Workflow B — every other trip, and every Тэсэлгээний аялал:
  *   mechanic inspects the vehicle (a passed inspection gets a 6-digit code)
- *   → travelers submit with that code → both approvers approve → one
+ *   → travelers submit with that code → the approver approves → one
  *   consolidated email.
+ *
+ * The approver is Uyanga (APPROVER_1_*). Every configured approver must
+ * approve, so adding APPROVER_2_* later makes it two, without code changes.
  *
  * Each request is a folder of write-once files (api/_store.js getRawStore):
  *
@@ -56,8 +59,6 @@ import { getRawStore } from "./_store.js";
 /** A mechanic code is valid this long after the inspection. */
 export const CODE_TTL_MS = 24 * 60 * 60 * 1000;
 
-/** Both configured approvers must approve. */
-export const REQUIRED_APPROVERS = 2;
 
 export const STAGES = {
   waitingTravel: "waiting_travel",
@@ -90,8 +91,8 @@ const vehicleValid = (value) => typeof value === "string" && /^\S[^\r\n]*, [0-9]
 /* ---------- Approvers ---------- */
 
 /**
- * Approvers come from APPROVER_1_* and APPROVER_2_* (NAME, EMAIL,
- * PASSWORD). The key is the number, so renaming a person keeps history.
+ * Approvers come from APPROVER_1_* (and optionally APPROVER_2_*): NAME,
+ * EMAIL, PASSWORD. The key is the number, so renaming a person keeps history.
  */
 export function approvers() {
   return [1, 2]
@@ -106,10 +107,11 @@ export function approvers() {
 
 function approversError() {
   const list = approvers();
-  if (list.length !== REQUIRED_APPROVERS) {
-    return fail(500, "Батлах 2 хүний тохиргоо дутуу байна (APPROVER_1_*, APPROVER_2_*).");
+  if (list.length === 0) {
+    return fail(500, "Батлагчийн тохиргоо дутуу байна (APPROVER_1_NAME, APPROVER_1_PASSWORD).");
   }
-  if (list[0].password === list[1].password || list.some((approver) => approver.password === process.env.MECHANIC_PASSWORD)) {
+  const passwords = list.map((approver) => approver.password);
+  if (new Set(passwords).size !== passwords.length || passwords.includes(process.env.MECHANIC_PASSWORD)) {
     return fail(500, "Батлагч бүр өөр нууц үгтэй байх ёстой (механикийн нууц үгээс ч өөр).");
   }
   return null;
@@ -177,7 +179,7 @@ export function describe(id, { inspection, travel, sent, decisions }, now = Date
   const keys = approvers().map((approver) => approver.key);
   const approvals = decisions.filter((decision) => decision.decision === APPROVE);
   const rejection = decisions.find((decision) => decision.decision === REJECT);
-  const allApproved = keys.length === REQUIRED_APPROVERS && keys.every((key) => approvals.some((a) => a.key === key));
+  const allApproved = keys.length > 0 && keys.every((key) => approvals.some((a) => a.key === key));
 
   let stage;
   if (inspection && inspection.inspection.result !== MECHANIC_PASS) stage = STAGES.failed;
@@ -258,7 +260,7 @@ async function alertApprovers(request, origin) {
   <body style="margin:0; padding:24px; background:#f3f4f6; font-family:Arial,Helvetica,sans-serif; color:#111827;">
     <div style="max-width:640px; margin:0 auto; background:#ffffff; border:1px solid #e5e7eb; border-radius:10px; padding:24px;">
       <div style="font-size:18px; font-weight:700; margin-bottom:8px;">Батлах хүсэлт ирлээ</div>
-      <div style="font-size:14px; margin-bottom:16px;">${esc(titleOf(form))} таны баталгааг хүлээж байна. Хоёр батлагч хоёулаа зөвшөөрсний дараа нэгдсэн имэйл илгээгдэнэ.</div>
+      <div style="font-size:14px; margin-bottom:16px;">${esc(titleOf(form))} таны баталгааг хүлээж байна. Батлагдсаны дараа нэгдсэн имэйл илгээгдэнэ.</div>
       <table cellpadding="0" cellspacing="0" style="border-collapse:collapse; width:100%; font-size:14px; margin-bottom:18px;">
         ${rows
           .map(

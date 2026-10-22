@@ -22,9 +22,9 @@ Object.assign(process.env, {
   APPROVER_1_NAME: "Уянга",
   APPROVER_1_EMAIL: "uyanga@example.test",
   APPROVER_1_PASSWORD: "uyanga-pw",
-  APPROVER_2_NAME: "Хоёрдугаар батлагч",
-  APPROVER_2_EMAIL: "second@example.test",
-  APPROVER_2_PASSWORD: "second-pw",
+  APPROVER_2_NAME: "",
+  APPROVER_2_EMAIL: "",
+  APPROVER_2_PASSWORD: "",
   MECHANIC_STORE_FILE: path.join(root, "legacy.json"),
   WORKFLOW_STORE_DIR: path.join(root, "workflow"),
   SMTP_HOST: "",
@@ -162,35 +162,30 @@ async function test(name, fn) {
 
 /* ---------- Workflow A: АТҮТ ---------- */
 
-await test("A: АТҮТ needs no mechanic; travelers submit → approvers are alerted, no final email yet", async () => {
+await test("A: АТҮТ needs no mechanic; travelers submit → Uyanga is alerted, no final email yet", async () => {
   const r = await submit(atut());
   assert.equal(r.status, 200, JSON.stringify(r.body));
   assert.equal(r.body.stage, "waiting_approval");
   const mail = newMail();
   assert.equal(finals(mail).length, 0, "no final email before approval");
-  assert.equal(alerts(mail).length, 1, "one alert to both approvers");
-  assert.match(to(alerts(mail)[0]), /second@example\.test/);
+  assert.equal(alerts(mail).length, 1, "one alert to Uyanga");
   assert.ok(alerts(mail)[0].html.includes(`${ORIGIN}/approve#request=${r.body.id}`), "alert links to the request");
 });
 
-await test("A: one approval is not enough; the second sends exactly one consolidated email", async () => {
+await test("A: Uyanga's approval sends exactly one consolidated email", async () => {
   const { body } = await submit(atut());
   newMail();
-  assert.equal((await decide("uyanga-pw", body.id)).body.stage, "waiting_approval");
-  assert.equal(finals(newMail()).length, 0, "still waiting for the second approver");
-  assert.equal((await decide("uyanga-pw", body.id)).status, 409, "same approver cannot approve twice");
-
-  const second = await decide("second-pw", body.id);
-  assert.equal(second.status, 200, JSON.stringify(second.body));
-  assert.equal(second.body.stage, "sent");
+  const approved = await decide("uyanga-pw", body.id);
+  assert.equal(approved.status, 200, JSON.stringify(approved.body));
+  assert.equal(approved.body.stage, "sent");
   const [final, ...more] = finals(newMail());
   assert.equal(more.length, 0, "exactly one final email");
   assert.match(final.html, /Батлагдсан/);
   assert.match(final.html, /Уянга/);
-  assert.match(final.html, /Хоёрдугаар батлагч/);
   assert.doesNotMatch(final.html, /Авто машин үзлэгийн хуудас/, "АТҮТ email has no inspection");
   assert.equal(await stageOf(body.id), "sent");
 
+  assert.equal((await decide("uyanga-pw", body.id)).status, 409, "cannot approve twice");
   assert.equal((await wf({ action: "resend", password: "uyanga-pw", id: body.id })).status, 409, "cannot resend a sent request");
   assert.equal(finals(newMail()).length, 0);
 });
@@ -198,21 +193,34 @@ await test("A: one approval is not enough; the second sends exactly one consolid
 await test("A: a rejection stops the request, needs a reason, and sends nothing", async () => {
   const { body } = await submit(atut());
   newMail();
-  assert.equal((await decide("second-pw", body.id, "reject", "")).status, 400, "reason required");
-  assert.equal((await decide("second-pw", body.id, "reject", "Огноо буруу")).body.stage, "rejected");
+  assert.equal((await decide("uyanga-pw", body.id, "reject", "")).status, 400, "reason required");
+  assert.equal((await decide("uyanga-pw", body.id, "reject", "Огноо буруу")).body.stage, "rejected");
   assert.equal((await decide("uyanga-pw", body.id)).status, 409, "no approving after rejection");
   assert.equal(finals(newMail()).length, 0);
   const history = (await wf({ action: "request", password: "uyanga-pw", id: body.id })).body.request.history;
   assert.ok(history.some((event) => event.what.includes("Огноо буруу")), "rejection reason in history");
 });
 
-await test("Both approvers approving at the same moment still send one email", async () => {
+await test("Approving twice at the same moment (double click) sends one email", async () => {
   const { body } = await submit(atut());
   newMail();
-  const [a, b] = await Promise.all([decide("uyanga-pw", body.id), decide("second-pw", body.id)]);
-  assert.equal(a.status, 200, JSON.stringify(a.body));
-  assert.equal(b.status, 200, JSON.stringify(b.body));
+  const results = await Promise.all([decide("uyanga-pw", body.id), decide("uyanga-pw", body.id)]);
+  assert.deepEqual(results.map((r) => r.status).sort(), [200, 409]);
   assert.equal(finals(newMail()).length, 1);
+});
+
+await test("If a second approver is configured, both must approve", async () => {
+  Object.assign(process.env, { APPROVER_2_NAME: "Хоёр дахь", APPROVER_2_EMAIL: "second@example.test", APPROVER_2_PASSWORD: "second-pw" });
+  try {
+    const { body } = await submit(atut());
+    assert.match(to(alerts(newMail())[0]), /second@example.test/, "both alerted");
+    assert.equal((await decide("uyanga-pw", body.id)).body.stage, "waiting_approval");
+    assert.equal(finals(newMail()).length, 0, "one approval is not enough");
+    assert.equal((await decide("second-pw", body.id)).body.stage, "sent");
+    assert.equal(finals(newMail()).length, 1);
+  } finally {
+    Object.assign(process.env, { APPROVER_2_NAME: "", APPROVER_2_EMAIL: "", APPROVER_2_PASSWORD: "" });
+  }
 });
 
 /* ---------- Workflow B: mechanic first ---------- */
@@ -252,7 +260,7 @@ await test("B: travelers submit with the code; vehicle and driver come from the 
   const r = await submit(travel("Байгууллагын унаагаар", { inspectionCode: codeB }));
   assert.equal(r.status, 200, JSON.stringify(r.body));
   assert.equal(alerts(newMail()).length, 1);
-  const detail = (await wf({ action: "request", password: "second-pw", id: r.body.id })).body.request;
+  const detail = (await wf({ action: "request", password: "uyanga-pw", id: r.body.id })).body.request;
   assert.equal(detail.workflow, "B");
   assert.ok(detail.rows.some(([label, value]) => label === "Автомашин" && value === "Toyota Land Cruiser, 1234 УБА"));
   assert.ok(detail.rows.some(([label, value]) => label === "Жолооч" && value === "Дорж"));
@@ -262,7 +270,6 @@ await test("B: travelers submit with the code; vehicle and driver come from the 
   assert.equal((await wf({ action: "code", code: codeB })).status, 409);
 
   await decide("uyanga-pw", r.body.id);
-  await decide("second-pw", r.body.id);
   const [final, ...more] = finals(newMail());
   assert.equal(more.length, 0);
   assert.match(final.html, /Авто машин үзлэгийн хуудас/);
@@ -280,7 +287,6 @@ await test("B: a blasting code only fits a blasting trip, and uses the blasting 
   assert.equal(ok.status, 200, JSON.stringify(ok.body));
   newMail();
   await decide("uyanga-pw", ok.body.id);
-  await decide("second-pw", ok.body.id);
   const [final] = finals(newMail());
   assert.match(final.html, /Маяак/, "blasting sheet items");
   assert.match(final.html, /ТБ-2026\/045/);
@@ -327,21 +333,20 @@ await test("Inspection and travel forms are validated", async () => {
 await test("If the final email fails, it can be sent again, and only once", async () => {
   const { body } = await submit(atut());
   newMail();
-  await decide("uyanga-pw", body.id);
 
   // An outbox path under a file cannot be created, so delivery fails.
   const saved = process.env.MAIL_OUTBOX_DIR;
   process.env.MAIL_OUTBOX_DIR = path.join(root, "legacy.json", "nope");
   writeFileSync(path.join(root, "legacy.json"), "{}");
-  const failed = await decide("second-pw", body.id);
+  const failed = await decide("uyanga-pw", body.id);
   process.env.MAIL_OUTBOX_DIR = saved;
   assert.equal(failed.status, 502);
   assert.equal(await stageOf(body.id), "approved", "approved but not sent");
 
-  const retry = await wf({ action: "resend", password: "second-pw", id: body.id });
+  const retry = await wf({ action: "resend", password: "uyanga-pw", id: body.id });
   assert.equal(retry.status, 200, JSON.stringify(retry.body));
   assert.equal(finals(newMail()).length, 1);
-  assert.equal((await wf({ action: "resend", password: "second-pw", id: body.id })).status, 409);
+  assert.equal((await wf({ action: "resend", password: "uyanga-pw", id: body.id })).status, 409);
 });
 
 await test("Without email settings, travelers can still submit; approval waits for email to work", async () => {
@@ -350,24 +355,22 @@ await test("Without email settings, travelers can still submit; approval waits f
   try {
     const { status, body } = await submit(atut());
     assert.equal(status, 200, "traveler submit does not need email settings");
-    await decide("uyanga-pw", body.id);
-    assert.equal((await decide("second-pw", body.id)).status, 500);
+    assert.equal((await decide("uyanga-pw", body.id)).status, 500);
     assert.equal(await stageOf(body.id), "approved");
   } finally {
     process.env.MAIL_OUTBOX_DIR = saved;
   }
 });
 
-await test("Without two approvers configured, nothing can be submitted", async () => {
-  const saved = process.env.APPROVER_2_PASSWORD;
-  delete process.env.APPROVER_2_PASSWORD;
+await test("Without an approver configured, nothing can be submitted", async () => {
+  const saved = process.env.APPROVER_1_PASSWORD;
+  delete process.env.APPROVER_1_PASSWORD;
   const r = await submit(atut());
-  process.env.APPROVER_2_PASSWORD = saved;
-  assert.equal(r.status, 500);
-  process.env.APPROVER_2_PASSWORD = process.env.APPROVER_1_PASSWORD;
+  process.env.APPROVER_1_PASSWORD = "mechanic-pw";
   const same = await submit(atut());
-  process.env.APPROVER_2_PASSWORD = saved;
-  assert.equal(same.status, 500, "approvers need different passwords");
+  process.env.APPROVER_1_PASSWORD = saved;
+  assert.equal(r.status, 500);
+  assert.equal(same.status, 500, "approver password must differ from the mechanic's");
   assert.equal(newMail().length, 0);
 });
 
@@ -391,7 +394,6 @@ await test("An old waiting form, once inspected, goes to approval instead of str
   assert.equal((await handleMechanic({ token, inspection: inspectionFor("Энгийн аялал"), signature: PNG })).status, 409);
 
   await decide("uyanga-pw", id);
-  await decide("second-pw", id);
   assert.equal(finals(newMail()).length, 1);
 });
 

@@ -29,9 +29,9 @@ const requestIdFromHash = () => /^#request=([0-9a-f-]{36})$/.exec(window.locatio
 const workflowLabel = (request) => (request.workflow === "B" ? "Механик үзлэгтэй" : "АТҮТ · механикгүй");
 
 /**
- * /approve: the two approvers' page. Lists requests that wait for the
+ * /approve: the approver's page. Lists requests that wait for the
  * signed-in approver, and opens one to approve or reject. The consolidated
- * email goes out once both have approved.
+ * email goes out once every approver has approved.
  */
 export default function ApprovalPage() {
   const [password, setPassword] = useState(() => sessionValue(PASSWORD_KEY));
@@ -139,7 +139,7 @@ function RequestList({ password, me, onLogOut }) {
         <header className="hero hero--approve">
           <span className="heroChip">{me.name}</span>
           <h1>Аяллын хүсэлт батлах</h1>
-          <p>Хоёр батлагч хоёулаа зөвшөөрсний дараа нэгдсэн имэйл илгээгдэнэ.</p>
+          <p>Батлагдсаны дараа нэгдсэн имэйл илгээгдэнэ.</p>
         </header>
 
         <div className="inboxBar">
@@ -391,7 +391,7 @@ function RequestDetail({ id, password, me }) {
 
         {request.stage === "approved" && (
           <Section title="Имэйл илгээгдээгүй" icon={<AlertTriangle size={18} />}>
-            <p className="helper">Хоёулаа зөвшөөрсөн боловч нэгдсэн имэйл илгээгдээгүй байна. Дахин оролдоно уу.</p>
+            <p className="helper">Батлагдсан боловч нэгдсэн имэйл илгээгдээгүй байна. Дахин оролдоно уу.</p>
             <button type="button" className="approveBtn" onClick={() => act({ action: "resend" })} disabled={busy}>
               {busy ? "Илгээж байна..." : "Имэйл илгээх"}
             </button>
