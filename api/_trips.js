@@ -18,6 +18,12 @@ export const TRIP_TYPES = [NORMAL_TRIP, BLAST_TRIP];
 /** Public transport has no vehicle to inspect, so it skips the mechanic. */
 export const PUBLIC_TRANSPORT = "АТҮТ / Нийтийн тээвэр";
 
+/** A ride with a passing vehicle: no company car to inspect either. */
+export const ROAD_RIDE = "Замын унаа";
+
+/** Normal-trip transports that go straight to approval, without the mechanic. */
+export const NO_MECHANIC_TRANSPORTS = [PUBLIC_TRANSPORT, ROAD_RIDE];
+
 export const YES = "Тийм";
 export const NO = "Үгүй";
 export const YES_NO = [YES, NO];
@@ -28,12 +34,12 @@ export const VEHICLE_OWNERS = [
 ];
 
 /**
- * Whether a submission goes to the mechanic first. Only public-transport
- * trips go straight to the final recipients; every other trip, and every
- * blasting trip, waits for the mechanic's inspection.
+ * Whether a trip needs the mechanic's inspection before approval. АТҮТ and
+ * Замын унаа go straight to approval; every other trip, and every blasting
+ * trip, needs the inspection.
  */
 export const needsMechanic = (form) =>
-  form.tripType === BLAST_TRIP || form.transport !== PUBLIC_TRANSPORT;
+  form.tripType === BLAST_TRIP || !NO_MECHANIC_TRANSPORTS.includes(form.transport);
 
 export const BLAST_CHECKLIST = [
   "Тээврийн хэрэгсэл \"ТЭСРЭХ АЮУЛТАЙ\" тэмдэг, улаан тугтай.",

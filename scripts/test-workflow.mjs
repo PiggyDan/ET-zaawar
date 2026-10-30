@@ -287,6 +287,24 @@ await test("Without an approver email, nobody is alerted, but approval and the f
   }
 });
 
+await test("Замын унаа skips the mechanic: straight to approval, a code is ignored", async () => {
+  const ride = travel("Замын унаа", { vehicle: "Toyota Prado, 5555 УНА", driver: "Батаа", driverPhone: "88110000" });
+  const r = await submit(ride);
+  assert.equal(r.status, 200, JSON.stringify(r.body));
+  assert.equal(r.body.stage, "waiting_approval");
+  assert.equal(alerts(newMail()).length, 1, "approver alerted at once");
+  const forMechanic = await wf({ action: "inspectRequest", password: "mechanic-pw", id: r.body.id, inspection: inspectionFor("Энгийн аялал"), signature: PNG });
+  assert.equal(forMechanic.status, 404, "nothing for the mechanic");
+  const detail = (await wf({ action: "request", password: "uyanga-pw", id: r.body.id })).body.request;
+  assert.equal(detail.workflow, "A");
+  assert.ok(detail.rows.some(([label, value]) => label === "Автомашин" && value === "Toyota Prado, 5555 УНА"), "typed vehicle kept");
+  assert.equal((await submit({ ...ride, inspectionCode: "123" })).status, 200, "a stray code does not matter");
+  assert.equal((await submit({ ...ride, vehicle: "" })).status, 400, "vehicle still required");
+  await decide("uyanga-pw", r.body.id);
+  const [final] = finals(newMail());
+  assert.doesNotMatch(final.html, /Авто машин үзлэгийн хуудас/);
+});
+
 /* ---------- Workflow B: mechanic first ---------- */
 
 let codeB;
@@ -294,7 +312,7 @@ const inspectRequest = (id, extra = {}) =>
   wf({ action: "inspectRequest", password: "mechanic-pw", id, inspection: inspectionFor("Энгийн аялал", {}, ["1.5"]), signature: PNG, ...extra });
 
 await test("B, travelers first: without a code the request waits for the mechanic, not the approver", async () => {
-  for (const transport of ["Байгууллагын унаагаар", "Замын унаа", "Хувийн унаа", "Гэрээт компаний унаа", "Бусад"]) {
+  for (const transport of ["Байгууллагын унаагаар", "Хувийн унаа", "Гэрээт компаний унаа", "Бусад"]) {
     const r = await submit(travel(transport, { vehicle: "Toyota Prado, 5555 УНА", driver: "Батаа", driverPhone: "88110000" }));
     assert.equal(r.status, 200, `${transport}: ${JSON.stringify(r.body)}`);
     assert.equal(r.body.stage, "waiting_mechanic");
@@ -336,7 +354,7 @@ await test("B, travelers first: the mechanic inspects it once, then the approver
 });
 
 await test("B, travelers first: a failed inspection stops the request", async () => {
-  const { body } = await submit(travel("Замын унаа", { vehicle: "Toyota Prado, 5555 УНА", driver: "Батаа", driverPhone: "88110000" }));
+  const { body } = await submit(travel("Хувийн унаа", { vehicle: "Toyota Prado, 5555 УНА", driver: "Батаа", driverPhone: "88110000" }));
   const r = await inspectRequest(body.id, { inspection: inspectionFor("Энгийн аялал", { result: "Тэнцээгүй", note: "Тоормос муу" }) });
   assert.equal(r.body.stage, "inspection_failed");
   assert.equal((await decide("uyanga-pw", body.id)).status, 409);

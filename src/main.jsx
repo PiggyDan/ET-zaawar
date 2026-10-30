@@ -37,6 +37,7 @@ import {
   YES,
   YES_NO,
   checklistFor,
+  needsMechanic,
   validateBlast,
   validateTravel
 } from "../api/_trips.js";
@@ -170,6 +171,9 @@ function App() {
 
   const isBlast = form.tripType === BLAST_TRIP;
   const isPublicTransport = !isBlast && form.transport === PUBLIC_TRANSPORT;
+  // Замын унаа keeps the vehicle fields but, like АТҮТ, skips the mechanic.
+  const mechanicNeeded = needsMechanic(form);
+  const code = mechanicNeeded ? codeInfo : null;
   const activeChecklist = checklistFor(form);
   const maxPassengers = MAX_PASSENGERS[form.tripType];
 
@@ -245,11 +249,11 @@ function App() {
    */
   const payloadForm = () => ({
     ...form,
-    inspectionCode: isPublicTransport ? "" : codeInfo?.code || "",
-    driver: isPublicTransport ? "" : codeInfo ? codeInfo.driver : form.driver,
-    driverPhone: isPublicTransport ? "" : codeInfo ? codeInfo.driverPhone : form.driverPhone,
-    vehicle: isPublicTransport ? "" : codeInfo ? codeInfo.vehicle : `${form.vehicle.trim()}, ${form.vehiclePlate.trim()}`,
-    vehiclePlate: isPublicTransport || codeInfo ? "" : form.vehiclePlate,
+    inspectionCode: code?.code || "",
+    driver: isPublicTransport ? "" : code ? code.driver : form.driver,
+    driverPhone: isPublicTransport ? "" : code ? code.driverPhone : form.driverPhone,
+    vehicle: isPublicTransport ? "" : code ? code.vehicle : `${form.vehicle.trim()}, ${form.vehiclePlate.trim()}`,
+    vehiclePlate: isPublicTransport || code ? "" : form.vehiclePlate,
     starlink: isPublicTransport ? "" : form.starlink,
     gps: isPublicTransport ? "" : form.gps,
     checklist: activeChecklist.filter((item) => checklist.includes(item))
@@ -262,7 +266,7 @@ function App() {
 
     const sent = payloadForm();
     // A typed code must be checked first, so it is not silently ignored.
-    const missing = !isPublicTransport && codeInput && !codeInfo ? ["Механикийн код (шалгах товч дарна уу)"] : [];
+    const missing = mechanicNeeded && codeInput && !codeInfo ? ["Механикийн код (шалгах товч дарна уу)"] : [];
     missing.push(...(isBlast ? validateBlast(sent) : validateTravel(sent)));
 
     if (!activeChecklist.every((item) => checklist.includes(item))) missing.push("Шалгах хуудас");
@@ -534,7 +538,7 @@ function App() {
             </Field>
             )}
 
-            {!isPublicTransport && (
+            {mechanicNeeded && (
               <MechanicCode
                 value={codeInput}
                 onChange={(value) => {
@@ -547,7 +551,7 @@ function App() {
               />
             )}
 
-            {!isPublicTransport && !codeInfo && (
+            {!isPublicTransport && !code && (
               <DriverVehicleFields form={form} setForm={setForm} updateForm={updateForm} />
             )}
 
